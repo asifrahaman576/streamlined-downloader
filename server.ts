@@ -285,10 +285,10 @@ async function startServer() {
     app.use(vite.middlewares);
     console.log("[VITE] Dev server attached");
   } else {
-    const distPath = path.join(__dirname, "dist");
+    const distPath = __dirname.endsWith("dist") ? __dirname : path.join(__dirname, "dist");
     app.use(express.static(distPath, { maxAge: "1h" }));
     app.get("*", (_req, res) => res.sendFile(path.join(distPath, "index.html")));
-    console.log("[STATIC] Serving production build from ./dist");
+    console.log(`[STATIC] Serving production build from ${distPath}`);
   }
 
   app.listen(PORT, "0.0.0.0", () => {
