@@ -6,6 +6,7 @@ startCommand = "npm start"
 [variables]
 NODE_ENV = "production"
 PORT = "3000"
+NIXPACKS_NODE_VERSION = "20"
 
 [deploy]
 healthcheckPath = "/api/health"
