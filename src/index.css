@@ -1,0 +1,59 @@
+@import "tailwindcss";
+@source "./**/*.{ts,tsx,html}";
+@source not "../downloads";
+@source not "../downloads.json";
+
+@theme {
+  --color-surface-bg: #f8f9fa;
+  --color-on-surface: #1a1c1e;
+  --color-error: #ba1a1a;
+  --color-surface-container-lowest: #ffffff;
+  --color-outline-variant: #e5e7eb;
+  --color-surface: #ffffff;
+  --color-container-high: #f3f4f6;
+  --color-on-primary-container: #064e3b;
+  --color-surface-container-low: #f9fafb;
+  --color-outline: #6b7280;
+  --color-container-highest: #e5e7eb;
+  --color-container-low: #f3f4f6;
+  --color-primary-fixed: #d1fae5;
+  --color-surface-container-high: #f3f4f6;
+  --color-surface-dim: #f1f5f9;
+  --color-inverse-surface: #1f2937;
+  --color-error-container: #ffdad6;
+  --color-primary-fixed-dim: #6ee7b7;
+  --color-on-surface-variant: #4b5563;
+  --color-surface-variant: #f3f4f6;
+  --color-success-fill: #10B981;
+  --color-background: #f8f9fa;
+  --color-surface-tint: #1f2937;
+  --color-secondary: #10B981;
+  --color-on-background: #1a1c1e;
+  --color-surface-container: #f1f3f5;
+  --color-on-primary: #ffffff;
+  --color-inverse-primary: #6ee7b7;
+  --color-secondary-container: #dcfce7;
+  --color-primary: #1f2937;
+  --color-accent: #10B981;
+  --color-primary-container: #f3f4f6;
+
+  --font-headline-lg: "Geist";
+  --font-headline-md: "Geist";
+  --font-body-md: "Geist";
+  --font-body-sm: "Geist";
+  --font-label-mono: "JetBrains Mono";
+  --font-label-mono-xs: "JetBrains Mono";
+
+  --spacing-sidebar-width: 192px;
+  --spacing-header-height: 48px;
+  --spacing-container-padding: 24px;
+  --spacing-row-height: 48px;
+  --spacing-group-gap: 16px;
+  --spacing-row-gap: 2px;
+}
+
+@layer utilities {
+  .progress-glow {
+    box-shadow: 0 0 8px rgba(16, 185, 129, 0.3);
+  }
+}
