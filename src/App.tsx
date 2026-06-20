@@ -133,8 +133,12 @@ export default function App() {
         body: JSON.stringify({ sessionId: SESSION_ID, urls: lines }),
       });
 
+      // Safely parse — server might return HTML on unexpected errors
+      const text = await res.text();
+      let data: any = {};
+      try { data = JSON.parse(text); } catch { /* non-JSON response */ }
+
       if (res.ok) {
-        const data = await res.json();
         const count = data.tasks?.length || 0;
         showStatus(
           `✅ ${count} task${count > 1 ? "s" : ""} queued — resolving in background...`,
@@ -143,11 +147,10 @@ export default function App() {
         setUrlInput("");
         fetchTasks();
       } else {
-        const err = await res.json();
-        showStatus(err.error || "Failed to resolve links", "error");
+        showStatus(data.error || `Server error (${res.status}) — try restarting the server`, "error");
       }
     } catch (e: any) {
-      showStatus(`Network error: ${e.message}`, "error");
+      showStatus(`Could not reach server — is it running?`, "error");
     } finally {
       setIsResolving(false);
     }
@@ -395,25 +398,7 @@ export default function App() {
                   ? "Paste FuckingFast or direct download URLs above. Files will download straight to your device — no storage used on our server."
                   : "Try changing the filter or search query above."}
               </p>
-              {tasks.length === 0 && (
-                <div className="mt-6 grid grid-cols-3 gap-4 text-xs text-on-surface-variant max-w-sm">
-                  <div className="bg-surface border border-outline-variant rounded-lg p-3 text-center">
-                    <span className="material-symbols-outlined text-primary text-[24px] block mb-1">bolt</span>
-                    <span className="font-bold block">Full Speed</span>
-                    <span>Your internet speed, not ours</span>
-                  </div>
-                  <div className="bg-surface border border-outline-variant rounded-lg p-3 text-center">
-                    <span className="material-symbols-outlined text-accent text-[24px] block mb-1">lock</span>
-                    <span className="font-bold block">Private</span>
-                    <span>Only you see your downloads</span>
-                  </div>
-                  <div className="bg-surface border border-outline-variant rounded-lg p-3 text-center">
-                    <span className="material-symbols-outlined text-secondary text-[24px] block mb-1">savings</span>
-                    <span className="font-bold block">Free</span>
-                    <span>No server storage needed</span>
-                  </div>
-                </div>
-              )}
+
             </div>
           ) : (
             <div className="space-y-2">
