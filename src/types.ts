@@ -44,6 +44,7 @@ export interface GrabbedLink {
   resumable: boolean;
   selected: boolean;
   source: string; // e.g. 'direct', 'link-crawler', 'gemini-analyzer', 'fuckingfast-extractor'
+  sourcePageUrl?: string;
 }
 
 export interface EngineSettings {
