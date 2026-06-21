@@ -279,7 +279,7 @@ export default function App() {
     }
   };
 
-  // Direct Queue injection form on dashboard
+  // Direct-to-PC download: extracts real URL then streams directly to user's browser (no server storage)
   const handleResolve = async () => {
     if (!urlInput.trim()) return;
 
@@ -294,78 +294,47 @@ export default function App() {
     }
 
     setAnalyzing(true);
-    showStatus(`Analyzing and resolving ${urls.length} download link(s)...`, "info");
+    showStatus(`Resolving ${urls.length} URL(s)... extracting direct download links`, "info");
 
     try {
-      // 1. Call analyze first to crawl and decode the real files
-      const analyzeRes = await fetch("/api/analyze", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ urls, url: urls[0], runAi: false }),
-      });
-      
-      let finalLinks: GrabbedLink[] = [];
-      if (analyzeRes.ok) {
-        const analyzeData = await analyzeRes.json();
-        if (analyzeData.links && analyzeData.links.length > 0) {
-          finalLinks = analyzeData.links;
+      // For each URL, trigger a browser download via the streaming proxy
+      // This makes files go DIRECTLY to PC — no server storage
+      for (let i = 0; i < urls.length; i++) {
+        const sourceUrl = urls[i];
+        
+        // Build the streaming proxy URL — server will extract FF links and pipe bytes directly
+        const streamUrl = `/api/stream-to-pc?url=${encodeURIComponent(sourceUrl)}`;
+        
+        // Open a browser download — Chrome will show download progress in its bar
+        // File goes: Internet → Server (proxy) → Browser → PC (your Downloads folder)
+        const link = document.createElement("a");
+        link.href = streamUrl;
+        link.download = ""; // browser will use Content-Disposition filename from server
+        link.style.display = "none";
+        document.body.appendChild(link);
+        link.click();
+        document.body.removeChild(link);
+        
+        // Small delay between multiple downloads to avoid overwhelming the server
+        if (i < urls.length - 1) {
+          await new Promise(r => setTimeout(r, 800));
         }
       }
 
-      // If analyze couldn't extract anything (or failed), fall back to direct links parsed from URLs
-      if (finalLinks.length === 0) {
-        finalLinks = urls.map((url, index) => {
-          let filename = "";
-          try {
-            filename = new URL(url).pathname.split("/").pop() || `download_${index + 1}.bin`;
-          } catch (_) {
-            filename = url.split("/").pop() || `download_${index + 1}.bin`;
-          }
-          if (filename.includes("?")) filename = filename.split("?")[0];
-          if (!filename) filename = `download_${index + 1}.bin`;
-          
-          // Clean up FuckingFast default raw names
-          if (url.toLowerCase().includes("fuckingfast")) {
-            const id = filename;
-            filename = `fuckingfast_${id}.zip`;
-          }
-
-          return {
-            id: `grab_manual_${Date.now()}_${index}_${Math.random().toString(36).substring(2, 5)}`,
-            url,
-            filename,
-            size: -1,
-            mimeType: "application/octet-stream",
-            resumable: true,
-            selected: true,
-            source: "direct-url",
-          };
-        });
-      }
-
-      // 2. Add them directly to active queue and import
-      const addRes = await fetch("/api/inbox/manage", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ action: "add_many", links: finalLinks }),
-      });
-      if (addRes.ok) {
-        // Automatically import selected links into active queue
-        await fetch("/api/inbox/manage", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ action: "import_selected" }),
-        });
-        showStatus(`Queued ${finalLinks.length} download task(s) successfully!`, "success");
-        setUrlInput("");
-        fetchState();
-      } else {
-        showStatus("Failed to queue direct links", "error");
-      }
+      showStatus(
+        `✓ ${urls.length} download${urls.length > 1 ? "s" : ""} started — check Chrome's download bar at the bottom!`,
+        "success"
+      );
+      setUrlInput("");
     } catch (error) {
-      showStatus("Failed to submit direct downloads", "error");
+      showStatus("Failed to start download", "error");
+    } finally {
+      setAnalyzing(false);
     }
   };
+
+
+
 
   // Manage Link Grabber Inbox Staging Queue
   const toggleInboxSelect = async (id: string) => {
@@ -763,11 +732,11 @@ export default function App() {
                 {/* Link input area */}
                 <div className="bg-surface border border-outline-variant rounded-xl p-5 shadow-sm">
                   <h2 className="text-sm font-bold text-on-surface mb-3 flex items-center gap-2">
-                    <span className="material-symbols-outlined text-primary text-[20px]">bolt</span>
-                    Resolve & Queue Links
+                    <span className="material-symbols-outlined text-primary text-[20px]">save_alt</span>
+                    Download Directly to Your PC
                   </h2>
                   <div className="text-xs text-on-surface-variant mb-3 leading-relaxed">
-                    Paste FuckingFast or direct file URLs (one per line). Files queue automatically in the multithreaded server-side downloader.
+                    Paste FuckingFast or direct file URLs (one per line). Files download <strong>directly to your PC</strong> — the server extracts the real link and streams it straight to your browser.
                   </div>
                   <textarea 
                     rows={3}
@@ -782,11 +751,20 @@ export default function App() {
                     </span>
                     <button 
                       onClick={handleResolve}
-                      disabled={linesCount === 0}
-                      className="bg-primary hover:bg-inverse-surface text-on-primary text-xs font-bold px-4 py-2 rounded-lg flex items-center gap-1.5 transition-all shadow-sm disabled:opacity-40 cursor-pointer"
+                      disabled={analyzing || linesCount === 0}
+                      className="bg-accent hover:brightness-110 text-white text-xs font-bold px-4 py-2 rounded-lg flex items-center gap-1.5 transition-all shadow-sm disabled:opacity-40 cursor-pointer"
                     >
-                      <span className="material-symbols-outlined text-[16px]">add</span>
-                      Queue Downloads
+                      {analyzing ? (
+                        <>
+                          <div className="w-3.5 h-3.5 border-2 border-white border-t-transparent rounded-full animate-spin"></div>
+                          Resolving...
+                        </>
+                      ) : (
+                        <>
+                          <span className="material-symbols-outlined text-[16px]">download_for_offline</span>
+                          Download to My PC
+                        </>
+                      )}
                     </button>
                   </div>
                 </div>

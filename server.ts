@@ -1412,6 +1412,166 @@ function getDownloadsDirSize(): number {
     }
   });
 
+  // ─── STREAMING PROXY: Extract real URL & pipe directly to browser (no server storage) ───
+  // This is the key endpoint that makes files download DIRECTLY to the user's PC.
+  // The server acts only as a transparent proxy — bytes flow: Internet → Server → Browser → PC.
+  app.get("/api/stream-to-pc", async (req: express.Request, res: express.Response) => {
+    const rawUrl = req.query.url as string;
+    const hintFilename = (req.query.filename as string) || "";
+
+    if (!rawUrl) {
+      res.status(400).send("url parameter required");
+      return;
+    }
+
+    if (!isValidUrlForDownload(rawUrl)) {
+      res.status(403).send("URL blocked by security policy");
+      return;
+    }
+
+    try {
+      let downloadUrl = rawUrl;
+      let downloadFilename = hintFilename;
+
+      // Step 1: If this is a FuckingFast page URL, extract the real CDN link first
+      if (fuckingFastExtractor.canHandle(rawUrl)) {
+        console.log(`[STREAM-PROXY] Extracting FuckingFast CDN link from: ${rawUrl}`);
+        try {
+          const extracted = await fuckingFastExtractor.extract(rawUrl);
+          if (extracted && extracted.length > 0 && extracted[0].url) {
+            downloadUrl = extracted[0].url;
+            if (!downloadFilename) downloadFilename = extracted[0].filename || "download";
+            console.log(`[STREAM-PROXY] Extracted real URL: ${downloadUrl.substring(0, 80)}...`);
+          } else {
+            res.status(502).send("Could not extract download URL from this page");
+            return;
+          }
+        } catch (extractErr: any) {
+          console.error("[STREAM-PROXY] Extraction failed:", extractErr.message);
+          res.status(502).send(`Link extraction failed: ${extractErr.message}`);
+          return;
+        }
+      }
+
+      // Step 2: Derive filename from URL if not provided
+      if (!downloadFilename) {
+        try {
+          const urlPath = new URL(downloadUrl).pathname;
+          downloadFilename = decodeURIComponent(urlPath.split("/").pop() || "download");
+          if (downloadFilename.includes("?")) downloadFilename = downloadFilename.split("?")[0];
+          if (!downloadFilename || downloadFilename === "/") downloadFilename = "download";
+        } catch (_) {
+          downloadFilename = "download";
+        }
+      }
+
+      // Step 3: Stream file from internet directly to browser — no disk writes
+      await new Promise<void>((resolve, reject) => {
+        const makeProxyRequest = (targetUrl: string, redirectCount = 0, cookieJar = "") => {
+          if (redirectCount > 8) {
+            reject(new Error("Too many redirects"));
+            return;
+          }
+
+          let parsedUrl: URL;
+          try {
+            parsedUrl = new URL(targetUrl);
+          } catch (_) {
+            reject(new Error("Invalid redirect URL"));
+            return;
+          }
+
+          const isHttps = parsedUrl.protocol === "https:";
+          const requester = isHttps ? https : http;
+
+          const reqHeaders: Record<string, string> = {
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+            "Accept": "*/*",
+            "Accept-Language": "en-US,en;q=0.9",
+            "Referer": parsedUrl.origin + "/",
+            "Connection": "keep-alive",
+          };
+          if (cookieJar) reqHeaders["Cookie"] = cookieJar;
+
+          const proxyReq = requester.request(targetUrl, { method: "GET", headers: reqHeaders, timeout: 30000 }, (proxyRes) => {
+            // Build cookie jar from redirects
+            let nextCookies = cookieJar;
+            if (proxyRes.headers["set-cookie"]) {
+              const newCookies = proxyRes.headers["set-cookie"].map(c => c.split(";")[0]).join("; ");
+              nextCookies = nextCookies ? `${nextCookies}; ${newCookies}` : newCookies;
+            }
+
+            // Follow redirects transparently
+            if (proxyRes.statusCode && proxyRes.statusCode >= 300 && proxyRes.statusCode < 400 && proxyRes.headers.location) {
+              const redirectUrl = new URL(proxyRes.headers.location, targetUrl).toString();
+              proxyRes.resume(); // drain and discard body
+              console.log(`[STREAM-PROXY] Redirect ${redirectCount + 1}: ${redirectUrl.substring(0, 80)}`);
+              makeProxyRequest(redirectUrl, redirectCount + 1, nextCookies);
+              return;
+            }
+
+            if (!proxyRes.statusCode || proxyRes.statusCode >= 400) {
+              reject(new Error(`Source server returned HTTP ${proxyRes.statusCode}`));
+              return;
+            }
+
+            // Detect Content-Disposition filename from source headers
+            const srcContentDisp = proxyRes.headers["content-disposition"];
+            if (srcContentDisp) {
+              const fnMatch = srcContentDisp.match(/filename[*]?=(?:UTF-8'')?["']?([^"';\r\n]+)["']?/i);
+              if (fnMatch && fnMatch[1]) {
+                downloadFilename = decodeURIComponent(fnMatch[1].trim());
+              }
+            }
+
+            const contentType = proxyRes.headers["content-type"] || "application/octet-stream";
+            const contentLength = proxyRes.headers["content-length"];
+
+            // Set browser download headers — this triggers Chrome's download bar
+            const safeFilename = downloadFilename.replace(/[^\w.\-() ]/g, "_");
+            res.setHeader("Content-Disposition", `attachment; filename="${safeFilename}"`);
+            res.setHeader("Content-Type", contentType);
+            res.setHeader("Cache-Control", "no-store");
+            if (contentLength) {
+              res.setHeader("Content-Length", contentLength);
+            }
+
+            // PIPE: bytes flow directly from internet → server memory → browser → PC disk
+            console.log(`[STREAM-PROXY] Streaming "${safeFilename}" (${contentLength ? Math.round(Number(contentLength) / 1024 / 1024) + " MB" : "unknown size"}) directly to browser`);
+            proxyRes.pipe(res);
+
+            proxyRes.on("end", () => {
+              console.log(`[STREAM-PROXY] Completed streaming "${safeFilename}" to browser`);
+              resolve();
+            });
+
+            proxyRes.on("error", reject);
+            res.on("close", () => {
+              // Browser disconnected (user cancelled)
+              proxyReq.destroy();
+              resolve();
+            });
+          });
+
+          proxyReq.on("error", reject);
+          proxyReq.on("timeout", () => {
+            proxyReq.destroy();
+            reject(new Error("Connection timeout after 30 seconds"));
+          });
+          proxyReq.end();
+        };
+
+        makeProxyRequest(downloadUrl);
+      });
+
+    } catch (err: any) {
+      console.error("[STREAM-PROXY] Error:", err.message);
+      if (!res.headersSent) {
+        res.status(500).send(`Stream failed: ${err.message}`);
+      }
+    }
+  });
+
   // Connect Vite Development environment or static routing
   if (process.env.NODE_ENV !== "production") {
     const vite = await createViteServer({
