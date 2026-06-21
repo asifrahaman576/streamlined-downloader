@@ -76,14 +76,26 @@ export default function App() {
     document.body.className = "bg-surface-bg text-on-surface";
   }, []);
 
-  // Keep track of tasks we have already auto-downloaded to avoid loops
+  // Track which tasks have been auto-saved to PC (to avoid duplicate triggers)
   const autoDownloadedRefs = useRef<Set<string>>(new Set());
+  // Track which tasks are currently being saved to PC (for UI state)
+  const [savingToPcIds, setSavingToPcIds] = useState<Set<string>>(new Set());
 
   useEffect(() => {
     downloads.forEach((task) => {
       if (task.status === "completed" && !autoDownloadedRefs.current.has(task.id)) {
         autoDownloadedRefs.current.add(task.id);
         
+        // Show "Saving to PC" status for 8 seconds
+        setSavingToPcIds(prev => new Set([...prev, task.id]));
+        setTimeout(() => {
+          setSavingToPcIds(prev => {
+            const next = new Set(prev);
+            next.delete(task.id);
+            return next;
+          });
+        }, 8000);
+
         // Trigger browser native download
         const link = document.createElement("a");
         link.href = `/api/downloads/files/${task.id}`;
@@ -825,6 +837,7 @@ export default function App() {
                            key={task.id}
                            task={task}
                            expanded={expandedTaskId === task.id}
+                           isSavingToPc={savingToPcIds.has(task.id)}
                            onToggleExpand={() => setExpandedTaskId(expandedTaskId === task.id ? null : task.id)}
                            onStart={() => handleTaskAction(task.id, "start")}
                            onPause={() => handleTaskAction(task.id, "pause")}
@@ -1516,6 +1529,7 @@ function PackageGroupRow({ packageName, tasks, expandedTaskId, onToggleExpand, o
               key={task.id}
               task={task}
               expanded={expandedTaskId === task.id}
+              isSavingToPc={false}
               onToggleExpand={() => onToggleExpand(task.id)}
               onStart={() => onStart(task.id)}
               onPause={() => onPause(task.id)}
@@ -1534,6 +1548,7 @@ function PackageGroupRow({ packageName, tasks, expandedTaskId, onToggleExpand, o
 interface TaskRowProps {
   task: DownloadTask;
   expanded: boolean;
+  isSavingToPc: boolean;
   onToggleExpand: () => void;
   onStart: () => void;
   onPause: () => void;
@@ -1545,6 +1560,7 @@ interface TaskRowProps {
 function TaskRowItem({
   task,
   expanded,
+  isSavingToPc,
   onToggleExpand,
   onStart,
   onPause,
@@ -1552,23 +1568,27 @@ function TaskRowItem({
   onDelete,
   isGroupChild,
 }: TaskRowProps) {
-  const percentage = task.size > 0 ? Math.round((task.downloaded / task.size) * 100) : -1;
+  // When completed, always show 100% — polling lag can cause the last value to be 98-99%
+  const rawPercentage = task.size > 0 ? Math.round((task.downloaded / task.size) * 100) : -1;
+  const isCompleted = task.status === "completed";
+  const percentage = isCompleted ? (task.size > 0 ? 100 : -1) : rawPercentage;
+
   const isDownloading = task.status === "downloading";
   const isQueued = task.status === "queued";
   const isPaused = task.status === "paused";
-  const isCompleted = task.status === "completed";
   const isError = task.status === "error";
   const isExtracting = task.status === "extracting";
 
   const getStatusLabel = () => {
+    if (isSavingToPc) return "↓ Saving to PC...";
     if (isDownloading) {
-      const spd = task.speed > 0 ? formatBytes(task.speed) + "/s" : "connecting...";
-      return `${spd}`;
+      const spd = task.speed > 0 ? formatBytes(task.speed) + "/s" : "Connecting...";
+      return spd;
     }
     if (isQueued) return "Queued";
     if (isPaused) return "Paused";
-    if (isCompleted) return "Completed ✓";
-    if (isError) return task.error ? `Error: ${task.error.slice(0, 30)}` : "Error";
+    if (isCompleted) return "Saved to PC ✓";
+    if (isError) return task.error ? `Error: ${task.error.slice(0, 40)}` : "Error";
     if (isExtracting) return "Resolving link...";
     return task.status;
   };
@@ -1582,11 +1602,11 @@ function TaskRowItem({
     return "bg-accent";
   };
 
-  // Progress width: use actual percentage if size known, show animated stripe if not
-  const progressWidth = percentage >= 0 ? `${percentage}%` : isDownloading || isExtracting ? "100%" : "0%";
-  const progressClass = percentage < 0 && (isDownloading || isExtracting)
+  // Progress bar width — completed always 100%, unknown size shows animated pulse
+  const progressWidth = isCompleted ? "100%" : (percentage >= 0 ? `${percentage}%` : (isDownloading || isExtracting ? "100%" : "0%"));
+  const progressClass = !isCompleted && percentage < 0 && (isDownloading || isExtracting)
     ? `${getProgressBarColor()} animate-pulse opacity-40`
-    : `${getProgressBarColor()} progress-glow`;
+    : `${getProgressBarColor()} progress-glow transition-all duration-500`;
 
   const iconName = getMimeIcon(task.mimeType, task.filename);
 
@@ -1622,16 +1642,23 @@ function TaskRowItem({
           <div className="flex-1 h-1.5 bg-container-highest rounded-full overflow-hidden">
             <div 
               style={{ width: progressWidth }}
-              className={`h-full transition-all duration-500 ${progressClass}`}
+              className={`h-full ${progressClass}`}
             />
           </div>
-          <span className="text-label-mono text-on-surface-variant w-10 text-right flex-shrink-0">
-            {percentage >= 0 ? `${percentage}%` : isCompleted ? "100%" : "--"}
+          <span className={`text-label-mono w-10 text-right flex-shrink-0 font-bold ${
+            isCompleted ? "text-accent" : "text-on-surface-variant"
+          }`}>
+            {isCompleted ? "100%" : (percentage >= 0 ? `${percentage}%` : "--")}
           </span>
         </div>
 
         {/* Status text */}
-        <div className="w-[160px] text-[10px] text-on-surface-variant text-right flex-shrink-0 hidden sm:block truncate pr-2">
+        <div className={`w-[160px] text-[10px] text-right flex-shrink-0 hidden sm:block truncate pr-2 ${
+          isSavingToPc ? "text-blue-600 font-bold animate-pulse" :
+          isCompleted ? "text-accent font-semibold" :
+          isError ? "text-error" :
+          "text-on-surface-variant"
+        }`}>
           {getStatusLabel()}
         </div>
 
