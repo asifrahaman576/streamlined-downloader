@@ -551,20 +551,6 @@ export default function App() {
           >
             <span className="material-symbols-outlined">settings</span>
           </button>
-          <button 
-            onClick={() => setActiveTab("testing")}
-            className={`p-2 rounded-lg transition-colors cursor-pointer ${activeTab === "testing" ? "bg-container-highest text-primary" : "text-on-surface-variant hover:bg-container-highest"}`}
-            title="CI/CD Quality Gate & Diagnostics"
-          >
-            <span className="material-symbols-outlined">shield_heart</span>
-          </button>
-          <button 
-            onClick={() => setActiveTab("architecture")}
-            className={`p-2 rounded-lg transition-colors cursor-pointer ${activeTab === "architecture" ? "bg-container-highest text-primary" : "text-on-surface-variant hover:bg-container-highest"}`}
-            title="System Topology"
-          >
-            <span className="material-symbols-outlined">dns</span>
-          </button>
         </div>
       </header>
 
@@ -611,51 +597,7 @@ export default function App() {
               {totalCompletedCount}
             </span>
           </button>
-          <button 
-            onClick={() => { setActiveTab("dashboard"); setFilterStatus("error"); }}
-            className={`w-full flex items-center gap-3 px-3 py-2 rounded-lg text-left cursor-pointer transition-transform active:scale-[0.98] ${
-              activeTab === "dashboard" && filterStatus === "error" ? "bg-container-highest text-primary font-bold" : "text-on-surface-variant hover:bg-container-high"
-            }`}
-          >
-            <span className="material-symbols-outlined text-[20px]">error</span>
-            <span className="text-body-md flex-1">Errors</span>
-            <span className="text-xs bg-container-high text-on-surface-variant font-mono px-1.5 py-0.2 rounded-full font-bold">
-              {totalErrorCount}
-            </span>
-          </button>
-
-          <div className="h-px bg-outline-variant my-2 mx-2"></div>
-
-          <button 
-            onClick={() => { setActiveTab("grabber"); }}
-            className={`w-full flex items-center gap-3 px-3 py-2 rounded-lg text-left cursor-pointer transition-transform active:scale-[0.98] ${
-              activeTab === "grabber" ? "bg-container-highest text-primary font-bold" : "text-on-surface-variant hover:bg-container-high"
-            }`}
-            title="Deep link webpage crawlers staging"
-          >
-            <span className="material-symbols-outlined text-[20px]">public</span>
-            <span className="text-body-md flex-1">Link Grabber</span>
-            {inbox.length > 0 && (
-              <span className="text-xs bg-amber-500 text-white font-mono px-1.5 py-0.2 rounded-full font-bold">
-                {inbox.length}
-              </span>
-            )}
-          </button>
         </nav>
-        
-        <div className="px-2 pt-4 border-t border-outline-variant mt-4 space-y-1">
-          <div className="flex items-center gap-1.5 text-[10px] text-on-surface-variant font-mono px-3 py-1.5 bg-container-low border border-outline-variant rounded-full mx-2">
-            <span className="w-1.5 h-1.5 rounded-full bg-accent animate-pulse"></span>
-            Server Daemon Online
-          </div>
-          <button 
-            onClick={() => showStatus(`Downloads folder: ${settings.downloadDirectory}`, "info")}
-            className="w-full flex items-center gap-3 px-3 py-2 text-on-surface-variant hover:bg-container-high rounded-lg text-left cursor-pointer transition-colors"
-          >
-            <span className="material-symbols-outlined text-[20px]">help</span>
-            <span className="text-body-md">Help & Info</span>
-          </button>
-        </div>
       </aside>
 
       {/* ─── Main Content Area ─── */}
@@ -819,58 +761,109 @@ export default function App() {
                   )}
                 </div>
 
-                {/* Dashboard Stats Bento */}
-                <div className="grid grid-cols-1 md:grid-cols-3 gap-group-gap mt-auto">
-                  <div className="bg-surface border border-outline-variant rounded-xl p-4 flex flex-col justify-between h-32 hover:border-accent transition-colors cursor-pointer">
-                    <div className="flex justify-between items-start">
-                      <span className="text-on-surface-variant text-label-mono uppercase">System Storage</span>
-                      <span className="material-symbols-outlined text-primary">hard_drive</span>
-                    </div>
+                {/* Staged Grabbed Links List (Integrated Inline Link Grabber Inbox) */}
+                <div className="bg-surface border border-outline-variant rounded-xl overflow-hidden shadow-sm">
+                  <div className="px-4 py-3 bg-container-high/50 border-b border-outline-variant flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
                     <div>
-                      <div className="flex justify-between text-body-md font-bold mb-2">
-                        <span>{formatBytes(diskUsageBytes)}</span>
-                        <span className="text-on-surface-variant text-body-sm font-normal">of 100 GB</span>
-                      </div>
-                      <div className="h-1.5 w-full bg-container-highest rounded-full overflow-hidden">
-                        <div 
-                          className="h-full bg-accent"
-                          style={{ width: `${Math.min(100, Math.round((diskUsageBytes / (100 * 1024 * 1024 * 1024)) * 100))}%` }}
-                        ></div>
-                      </div>
+                      <h3 className="font-bold text-on-surface text-body-md flex items-center gap-2">
+                        <span className="material-symbols-outlined text-amber-500">star</span>
+                        Staged Grabbed Files Inbox ({inbox.length})
+                      </h3>
+                      <p className="text-xs text-on-surface-variant mt-0.5">Choose elements to import into active scheduler downloads queue.</p>
                     </div>
+
+                    {inbox.length > 0 && (
+                      <div className="flex items-center gap-2">
+                        <button 
+                          onClick={clearInbox}
+                          className="text-xs bg-surface hover:bg-container-high border border-outline-variant text-on-surface-variant px-3 py-1.5 rounded-lg transition-colors cursor-pointer"
+                        >
+                          Clear Inbox
+                        </button>
+                        <button 
+                          onClick={importGrabbedToDownloads}
+                          className="text-xs bg-accent hover:brightness-110 text-white font-bold px-3 py-1.5 rounded-lg flex items-center gap-1 transition-colors shadow-sm cursor-pointer"
+                        >
+                          Import Selected ({inbox.filter(l => l.selected).length})
+                        </button>
+                      </div>
+                    )}
                   </div>
 
-                  <div className="bg-surface border border-outline-variant rounded-xl p-4 flex flex-col justify-between h-32 hover:border-accent transition-colors cursor-pointer">
-                    <div className="flex justify-between items-start">
-                      <span className="text-on-surface-variant text-label-mono uppercase">Network Load</span>
-                      <span className="material-symbols-outlined text-primary">lan</span>
-                    </div>
-                    <div>
-                      <div className="h-12 w-full flex items-end gap-1 mb-1">
-                        {networkLoad.map((val, idx) => (
-                          <div 
-                            key={idx}
-                            style={{ height: `${val}%` }}
-                            className="flex-1 bg-accent/30 hover:bg-accent/80 transition-all rounded-t-sm"
-                          ></div>
-                        ))}
+                  {inbox.length === 0 ? (
+                    <div className="p-8 text-center max-w-md mx-auto">
+                      <div className="bg-container-high w-10 h-10 rounded-full flex items-center justify-center mx-auto mb-3 border border-outline-variant text-on-surface-variant">
+                        <span className="material-symbols-outlined text-[20px]">public</span>
                       </div>
-                      <span className="text-label-mono-xs text-on-surface-variant">LAST 60 SECONDS</span>
+                      <h4 className="font-bold text-on-surface text-xs">No links staged yet</h4>
+                      <p className="text-[11px] text-on-surface-variant mt-1 leading-relaxed">
+                        Crawl webpage indices or paste hosting links in the box above to analyze and stage files here.
+                      </p>
                     </div>
-                  </div>
-
-                  <div className="bg-surface border border-outline-variant rounded-xl p-4 flex flex-col justify-between h-32 hover:border-accent transition-colors cursor-pointer">
-                    <div className="flex justify-between items-start">
-                      <span className="text-on-surface-variant text-label-mono uppercase">Daily Traffic</span>
-                      <span className="material-symbols-outlined text-primary">history</span>
+                  ) : (
+                    <div className="overflow-x-auto">
+                      <table className="w-full text-left text-xs text-on-surface-variant">
+                        <thead className="bg-container-high/40 text-[10px] uppercase text-outline tracking-wider border-b border-outline-variant">
+                          <tr>
+                            <th className="px-4 py-2.5 text-center w-12">
+                              <input 
+                                type="checkbox"
+                                checked={inbox.every(l => l.selected)}
+                                onChange={() => {
+                                  const allSel = inbox.every(l => l.selected);
+                                  setInbox(inbox.map(l => ({ ...l, selected: !allSel })));
+                                }}
+                                className="rounded border-outline-variant bg-surface text-accent focus:ring-0 cursor-pointer"
+                              />
+                            </th>
+                            <th className="px-4 py-2.5">File details</th>
+                            <th className="px-4 py-2.5">MIME-Type</th>
+                            <th className="px-4 py-2.5">Size</th>
+                            <th className="px-4 py-2.5">Source</th>
+                          </tr>
+                        </thead>
+                        <tbody className="divide-y divide-outline-variant/30 bg-surface">
+                          {inbox.map((link) => (
+                            <tr key={link.id} className="hover:bg-container-low/40 transition-colors">
+                              <td className="px-4 py-2.5 text-center">
+                                <input 
+                                  type="checkbox"
+                                  checked={link.selected}
+                                  onChange={() => toggleInboxSelect(link.id)}
+                                  className="rounded border-outline-variant bg-surface text-accent focus:ring-0 cursor-pointer"
+                                />
+                              </td>
+                              <td className="px-4 py-2.5 max-w-sm">
+                                <p className="font-bold text-on-surface truncate" title={link.filename}>
+                                  {link.filename}
+                                </p>
+                                <p className="text-[10px] text-outline font-mono mt-0.5 truncate break-all block">
+                                  {link.url}
+                                </p>
+                              </td>
+                              <td className="px-4 py-2.5">
+                                <span className="bg-container-high text-on-surface-variant px-1.5 py-0.5 rounded text-[10px] font-mono border border-outline-variant">
+                                  {link.mimeType || "application/octet-stream"}
+                                </span>
+                              </td>
+                              <td className="px-4 py-2.5 text-on-surface font-bold font-mono">
+                                {formatBytes(link.size)}
+                              </td>
+                              <td className="px-4 py-2.5">
+                                <span className={`text-[9px] px-1.5 py-0.5 rounded uppercase font-semibold border ${
+                                  link.source.includes("extractor") || link.source.includes("gemini")
+                                    ? "bg-indigo-50 text-indigo-700 border-indigo-200 font-bold"
+                                    : "bg-container-high text-on-surface-variant border-outline-variant"
+                                }`}>
+                                  {link.source}
+                                </span>
+                              </td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
                     </div>
-                    <div className="flex items-baseline gap-2">
-                      <span className="text-[32px] font-bold text-on-surface">
-                        {(12.5 + downloads.filter(t => t.status === "completed").reduce((acc, t) => acc + (t.size > 0 ? t.size : 0), 0) / 1024 / 1024 / 1024).toFixed(1)}
-                      </span>
-                      <span className="text-on-surface-variant text-body-md font-medium">GB downloaded today</span>
-                    </div>
-                  </div>
+                  )}
                 </div>
               </>
             )}
@@ -1410,21 +1403,7 @@ export default function App() {
 
         {/* Footer */}
         <footer className="border-t border-outline-variant bg-surface-container-low px-container-padding py-4 mt-8">
-          <div className="max-w-[1152px] mx-auto flex flex-wrap items-center justify-between gap-3 text-[10px] text-on-surface-variant font-mono">
-            <div className="flex items-center gap-4">
-              <span className="flex items-center gap-1">
-                <span className="material-symbols-outlined text-[14px] text-accent">check_circle</span>
-                Local multithreaded queue
-              </span>
-              <span className="flex items-center gap-1">
-                <span className="material-symbols-outlined text-[14px] text-accent">check_circle</span>
-                Pausing & speed limits active
-              </span>
-              <span className="flex items-center gap-1">
-                <span className="material-symbols-outlined text-[14px] text-accent">check_circle</span>
-                Cloudfare bypass self-healing
-              </span>
-            </div>
+          <div className="max-w-[1152px] mx-auto flex items-center justify-between text-[10px] text-on-surface-variant font-mono">
             <span>StreamlineDL • Version 2.1</span>
           </div>
         </footer>
