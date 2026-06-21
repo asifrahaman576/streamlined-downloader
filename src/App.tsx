@@ -533,6 +533,29 @@ export default function App() {
     return matchStatus && matchSearch;
   });
 
+  // Group tasks by packageId
+  const groupedDownloads = (() => {
+    const groups: Map<string, { packageId: string; packageName: string; tasks: typeof filteredDownloads }> = new Map();
+    const ungrouped: typeof filteredDownloads = [];
+
+    filteredDownloads.forEach((task) => {
+      if (task.packageId) {
+        if (!groups.has(task.packageId)) {
+          groups.set(task.packageId, {
+            packageId: task.packageId,
+            packageName: task.packageName || task.packageId,
+            tasks: [],
+          });
+        }
+        groups.get(task.packageId)!.tasks.push(task);
+      } else {
+        ungrouped.push(task);
+      }
+    });
+
+    return { groups: Array.from(groups.values()), ungrouped };
+  })();
+
   // Numeric stats calculations
   const totalCompletedCount = downloads.filter(t => t.status === "completed").length;
   const totalActiveCount = downloads.filter(t => t.status === "downloading" || t.status === "queued" || t.status === "extracting").length;
@@ -782,7 +805,22 @@ export default function App() {
                     </div>
                   ) : (
                     <div className="divide-y divide-outline-variant/30">
-                      {filteredDownloads.map((task) => (
+                      {/* Render grouped packages first */}
+                      {groupedDownloads.groups.map((group) => (
+                        <PackageGroupRow
+                          key={group.packageId}
+                          packageName={group.packageName}
+                          tasks={group.tasks}
+                          expandedTaskId={expandedTaskId}
+                          onToggleExpand={(id) => setExpandedTaskId(expandedTaskId === id ? null : id)}
+                          onStart={(id) => handleTaskAction(id, "start")}
+                          onPause={(id) => handleTaskAction(id, "pause")}
+                          onRetry={(id) => handleTaskAction(id, "retry")}
+                          onDelete={(id) => handleTaskAction(id, "delete")}
+                        />
+                      ))}
+                      {/* Render ungrouped tasks */}
+                      {groupedDownloads.ungrouped.map((task) => (
                         <TaskRowItem 
                            key={task.id}
                            task={task}
@@ -1361,6 +1399,137 @@ export default function App() {
   );
 }
 
+// ─── Package Group Row Component ───
+interface PackageGroupRowProps {
+  packageName: string;
+  tasks: DownloadTask[];
+  expandedTaskId: string | null;
+  onToggleExpand: (id: string) => void;
+  onStart: (id: string) => void;
+  onPause: (id: string) => void;
+  onRetry: (id: string) => void;
+  onDelete: (id: string) => void;
+}
+
+function PackageGroupRow({ packageName, tasks, expandedTaskId, onToggleExpand, onStart, onPause, onRetry, onDelete }: PackageGroupRowProps) {
+  const [groupExpanded, setGroupExpanded] = React.useState(false);
+
+  const totalSize = tasks.reduce((s, t) => s + (t.size > 0 ? t.size : 0), 0);
+  const totalDownloaded = tasks.reduce((s, t) => s + (t.downloaded || 0), 0);
+  const totalSpeed = tasks.filter(t => t.status === "downloading").reduce((s, t) => s + (t.speed || 0), 0);
+  const allCompleted = tasks.every(t => t.status === "completed");
+  const anyDownloading = tasks.some(t => t.status === "downloading" || t.status === "extracting");
+  const anyError = tasks.some(t => t.status === "error");
+  const percentage = totalSize > 0 ? Math.round((totalDownloaded / totalSize) * 100) : 0;
+
+  const groupStatus = allCompleted ? "completed" : anyError ? "error" : anyDownloading ? "downloading" : "queued";
+
+  return (
+    <div className="flex flex-col bg-surface">
+      {/* Group header row */}
+      <div className="h-row-height flex items-center px-4 group bg-container-low/30 hover:bg-container-low/50 transition-colors border-l-4 border-primary/40">
+        <div className="w-8 flex justify-center flex-shrink-0">
+          <span className={`material-symbols-outlined text-primary ${anyDownloading ? "animate-spin" : ""}`}>
+            {allCompleted ? "inventory_2" : "folder_zip"}
+          </span>
+        </div>
+        <div className="flex-1 px-4 min-w-0">
+          <button
+            onClick={() => setGroupExpanded(!groupExpanded)}
+            className="text-left w-full focus:outline-none cursor-pointer flex items-center gap-2 group/btn"
+            title={packageName}
+          >
+            <span className="text-body-md font-bold text-on-surface truncate flex-1 group-hover/btn:text-primary transition-colors" title={packageName}>
+              {packageName}
+            </span>
+            <span className="text-[10px] bg-primary/10 text-primary px-2 py-0.5 rounded-full font-bold flex-shrink-0">
+              {tasks.length} files
+            </span>
+            <span className={`material-symbols-outlined text-[16px] text-on-surface-variant transition-transform ${groupExpanded ? "rotate-180" : ""}`}>
+              expand_more
+            </span>
+          </button>
+        </div>
+
+        {/* Combined progress bar */}
+        <div className="w-[300px] flex items-center gap-4 px-4 flex-shrink-0 hidden md:flex">
+          <div className="flex-1 h-1.5 bg-container-highest rounded-full overflow-hidden">
+            <div
+              style={{ width: `${totalSize > 0 ? percentage : (anyDownloading ? 15 : 0)}%` }}
+              className={`h-full progress-glow transition-all duration-350 ${
+                anyError ? "bg-error" : allCompleted ? "bg-accent" : anyDownloading ? "bg-accent animate-pulse" : "bg-outline"
+              }`}
+            />
+          </div>
+          <span className="text-label-mono text-on-surface-variant w-12 text-right">
+            {totalSize > 0 ? `${percentage}%` : anyDownloading ? "--" : "--"}
+          </span>
+        </div>
+
+        {/* Status */}
+        <div className="w-[180px] text-label-mono text-on-surface-variant text-right flex-shrink-0 hidden sm:block truncate pr-2">
+          {allCompleted ? "All Completed" :
+           anyDownloading ? `${formatBytes(totalSpeed)}/s` :
+           anyError ? "Error" : "Queued"}
+        </div>
+
+        {/* Size */}
+        <div className="w-[100px] text-label-mono text-on-surface-variant text-right flex-shrink-0 hidden sm:block">
+          {totalSize > 0 ? formatBytes(totalSize) : "Unknown"}
+        </div>
+
+        {/* Controls */}
+        <div className="flex items-center gap-1.5 ml-4 flex-shrink-0">
+          {anyDownloading && (
+            <button
+              onClick={() => tasks.filter(t => t.status === "downloading").forEach(t => onPause(t.id))}
+              className="p-1.5 hover:bg-container-highest rounded text-on-surface-variant cursor-pointer"
+              title="Pause all"
+            >
+              <span className="material-symbols-outlined text-[18px]">pause</span>
+            </button>
+          )}
+          {!anyDownloading && !allCompleted && (
+            <button
+              onClick={() => tasks.filter(t => t.status === "queued" || t.status === "paused").forEach(t => onStart(t.id))}
+              className="p-1.5 hover:bg-container-highest rounded text-accent cursor-pointer"
+              title="Start all"
+            >
+              <span className="material-symbols-outlined text-[18px]">play_arrow</span>
+            </button>
+          )}
+          <button
+            onClick={() => tasks.forEach(t => onDelete(t.id))}
+            className="p-1.5 hover:bg-container-highest rounded text-error cursor-pointer"
+            title="Delete group"
+          >
+            <span className="material-symbols-outlined text-[18px]">close</span>
+          </button>
+        </div>
+      </div>
+
+      {/* Individual tasks within the group (expanded) */}
+      {groupExpanded && (
+        <div className="border-l-4 border-primary/20 ml-4">
+          {tasks.map((task) => (
+            <TaskRowItem
+              key={task.id}
+              task={task}
+              expanded={expandedTaskId === task.id}
+              onToggleExpand={() => onToggleExpand(task.id)}
+              onStart={() => onStart(task.id)}
+              onPause={() => onPause(task.id)}
+              onRetry={() => onRetry(task.id)}
+              onDelete={() => onDelete(task.id)}
+              isGroupChild
+            />
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
 // ─── Task Row Item Component ───
 interface TaskRowProps {
   task: DownloadTask;
@@ -1370,6 +1539,7 @@ interface TaskRowProps {
   onPause: () => void;
   onRetry: () => void;
   onDelete: () => void;
+  isGroupChild?: boolean;
 }
 
 function TaskRowItem({
@@ -1380,8 +1550,9 @@ function TaskRowItem({
   onPause,
   onRetry,
   onDelete,
+  isGroupChild,
 }: TaskRowProps) {
-  const percentage = task.size > 0 ? Math.round((task.downloaded / task.size) * 100) : 0;
+  const percentage = task.size > 0 ? Math.round((task.downloaded / task.size) * 100) : -1;
   const isDownloading = task.status === "downloading";
   const isQueued = task.status === "queued";
   const isPaused = task.status === "paused";
@@ -1390,12 +1561,15 @@ function TaskRowItem({
   const isExtracting = task.status === "extracting";
 
   const getStatusLabel = () => {
-    if (isDownloading) return `Downloading (${formatBytes(task.speed)}/s)`;
-    if (isQueued) return "Staged Queue";
+    if (isDownloading) {
+      const spd = task.speed > 0 ? formatBytes(task.speed) + "/s" : "connecting...";
+      return `${spd}`;
+    }
+    if (isQueued) return "Queued";
     if (isPaused) return "Paused";
-    if (isCompleted) return "Completed";
-    if (isError) return "Error";
-    if (isExtracting) return "Self-Healing link...";
+    if (isCompleted) return "Completed ✓";
+    if (isError) return task.error ? `Error: ${task.error.slice(0, 30)}` : "Error";
+    if (isExtracting) return "Resolving link...";
     return task.status;
   };
 
@@ -1404,53 +1578,70 @@ function TaskRowItem({
     if (isPaused) return "bg-outline";
     if (isQueued) return "bg-container-highest";
     if (isExtracting) return "bg-amber-500 animate-pulse";
+    if (isCompleted) return "bg-accent";
     return "bg-accent";
   };
+
+  // Progress width: use actual percentage if size known, show animated stripe if not
+  const progressWidth = percentage >= 0 ? `${percentage}%` : isDownloading || isExtracting ? "100%" : "0%";
+  const progressClass = percentage < 0 && (isDownloading || isExtracting)
+    ? `${getProgressBarColor()} animate-pulse opacity-40`
+    : `${getProgressBarColor()} progress-glow`;
 
   const iconName = getMimeIcon(task.mimeType, task.filename);
 
   return (
-    <div className={`flex flex-col bg-surface hover:bg-container-low/20 transition-colors ${isError ? "border-l-4 border-error" : ""}`}>
+    <div className={`flex flex-col bg-surface hover:bg-container-low/20 transition-colors ${isError ? "border-l-4 border-error" : ""} ${isGroupChild ? "bg-container-low/10" : ""}`}>
       <div className="h-row-height flex items-center px-4 group">
         <div className="w-8 flex justify-center flex-shrink-0">
           <span className={`material-symbols-outlined text-on-surface-variant group-hover:text-accent transition-colors ${isDownloading || isExtracting ? "animate-spin text-accent" : ""}`}>
             {iconName}
           </span>
         </div>
-        <div className="flex-1 px-4 truncate min-w-0">
+
+        {/* Filename — takes up remaining space, shows full name as tooltip */}
+        <div className="flex-1 px-3 min-w-0 overflow-hidden">
           <button 
             onClick={onToggleExpand}
-            className="text-left w-full text-body-md font-medium text-on-surface focus:outline-none cursor-pointer truncate hover:text-accent transition-colors"
+            className="text-left w-full focus:outline-none cursor-pointer group/name"
+            title={task.filename}
           >
-            {task.filename}
+            <span className="text-body-md font-medium text-on-surface group-hover/name:text-accent transition-colors block truncate">
+              {task.filename}
+            </span>
+            {task.downloaded > 0 && !isCompleted && (
+              <span className="text-[9px] text-outline font-mono">
+                {formatBytes(task.downloaded)}{task.size > 0 ? ` / ${formatBytes(task.size)}` : " downloaded"}
+              </span>
+            )}
           </button>
         </div>
 
         {/* Progress bar */}
-        <div className="w-[300px] flex items-center gap-4 px-4 flex-shrink-0 hidden md:flex">
-          <div className="flex-1 h-1 bg-container-highest rounded-full overflow-hidden">
+        <div className="w-[220px] flex items-center gap-3 px-3 flex-shrink-0 hidden md:flex">
+          <div className="flex-1 h-1.5 bg-container-highest rounded-full overflow-hidden">
             <div 
-              style={{ width: `${task.size > 0 ? percentage : 10}%` }}
-              className={`h-full progress-glow transition-all duration-350 ${getProgressBarColor()}`}
-            ></div>
+              style={{ width: progressWidth }}
+              className={`h-full transition-all duration-500 ${progressClass}`}
+            />
           </div>
-          <span className="text-label-mono text-on-surface-variant w-12 text-right">
-            {task.size > 0 ? `${percentage}%` : "--"}
+          <span className="text-label-mono text-on-surface-variant w-10 text-right flex-shrink-0">
+            {percentage >= 0 ? `${percentage}%` : isCompleted ? "100%" : "--"}
           </span>
         </div>
 
         {/* Status text */}
-        <div className="w-[180px] text-label-mono text-on-surface-variant text-right flex-shrink-0 hidden sm:block truncate pr-2">
+        <div className="w-[160px] text-[10px] text-on-surface-variant text-right flex-shrink-0 hidden sm:block truncate pr-2">
           {getStatusLabel()}
         </div>
 
         {/* File size */}
-        <div className="w-[100px] text-label-mono text-on-surface-variant text-right flex-shrink-0 hidden sm:block">
-          {task.size > 0 ? formatBytes(task.size) : "Unknown"}
+        <div className="w-[90px] text-label-mono text-on-surface-variant text-right flex-shrink-0 hidden sm:block">
+          {task.size > 0 ? formatBytes(task.size) : task.downloaded > 0 ? `~${formatBytes(task.downloaded)}` : "?"}
         </div>
 
         {/* Control actions */}
-        <div className="flex items-center gap-1.5 ml-4 flex-shrink-0">
+        <div className="flex items-center gap-1 ml-3 flex-shrink-0">
           {isDownloading && (
             <button 
               onClick={onPause}
@@ -1465,7 +1656,7 @@ function TaskRowItem({
             <button 
               onClick={onStart}
               className="p-1.5 hover:bg-container-highest rounded text-accent cursor-pointer flex items-center justify-center"
-              title="Resume download"
+              title="Start download"
             >
               <span className="material-symbols-outlined text-[18px]">play_arrow</span>
             </button>
@@ -1475,7 +1666,7 @@ function TaskRowItem({
             <button 
               onClick={onRetry}
               className="p-1.5 hover:bg-container-highest rounded text-on-surface-variant cursor-pointer flex items-center justify-center"
-              title="Re-download file"
+              title="Re-download"
             >
               <span className="material-symbols-outlined text-[18px]">replay</span>
             </button>
@@ -1485,17 +1676,17 @@ function TaskRowItem({
             <a 
               href={`/api/downloads/files/${task.id}`}
               download={task.filename}
-              className="p-1.5 hover:bg-container-highest rounded text-accent cursor-pointer flex items-center justify-center"
-              title="Stream download to device"
+              className="p-1.5 hover:bg-accent/10 rounded text-accent cursor-pointer flex items-center justify-center"
+              title="Save to my device"
             >
-              <span className="material-symbols-outlined text-[18px]">download</span>
+              <span className="material-symbols-outlined text-[18px]">save_alt</span>
             </a>
           )}
 
           <button 
             onClick={onDelete}
             className="p-1.5 hover:bg-container-highest rounded text-error cursor-pointer flex items-center justify-center"
-            title="Delete download task"
+            title="Remove task"
           >
             <span className="material-symbols-outlined text-[18px]">close</span>
           </button>
@@ -1505,6 +1696,11 @@ function TaskRowItem({
       {/* Expanded details panel */}
       {expanded && (
         <div className="px-12 py-4 bg-surface-container-low border-t border-outline-variant/30 text-[11px] space-y-3 font-mono text-on-surface-variant">
+          {/* Full filename display */}
+          <div>
+            <span className="font-bold text-outline">Filename:</span>{" "}
+            <span className="text-on-surface break-all select-all">{task.filename}</span>
+          </div>
           <div>
             <span className="font-bold text-outline">Target URL:</span>{" "}
             <a href={task.url} target="_blank" rel="noreferrer" className="text-accent hover:underline break-all">
@@ -1513,46 +1709,54 @@ function TaskRowItem({
           </div>
           {task.sourcePageUrl && (
             <div>
-              <span className="font-bold text-outline">Source Page URL:</span>{" "}
+              <span className="font-bold text-outline">Source Page:</span>{" "}
               <a href={task.sourcePageUrl} target="_blank" rel="noreferrer" className="text-accent hover:underline break-all">
                 {task.sourcePageUrl}
               </a>
             </div>
           )}
-          <div className="flex gap-6">
-            <div><span className="font-bold text-outline">MIME Type:</span> <span>{task.mimeType || "application/octet-stream"}</span></div>
+          <div className="flex gap-6 flex-wrap">
+            <div><span className="font-bold text-outline">Downloaded:</span> <span>{formatBytes(task.downloaded)}{task.size > 0 ? ` / ${formatBytes(task.size)}` : ""}</span></div>
+            <div><span className="font-bold text-outline">MIME:</span> <span>{task.mimeType || "application/octet-stream"}</span></div>
             <div><span className="font-bold text-outline">Resumable:</span> <span>{task.resumable ? "Yes" : "No"}</span></div>
-            <div><span className="font-bold text-outline">Priority:</span> <span>{task.priority || 0}</span></div>
+            {task.error && <div className="text-error break-all"><span className="font-bold">Error:</span> {task.error}</div>}
           </div>
+
+          {isCompleted && (
+            <div className="pt-2">
+              <a
+                href={`/api/downloads/files/${task.id}`}
+                download={task.filename}
+                className="inline-flex items-center gap-2 bg-accent hover:brightness-110 text-white text-xs font-bold px-4 py-2 rounded-lg transition-all shadow-sm cursor-pointer"
+              >
+                <span className="material-symbols-outlined text-[16px]">save_alt</span>
+                Save to My Device
+              </a>
+            </div>
+          )}
 
           {/* Introspection logs */}
           {task.debug_info && (
-            <div className="mt-3 bg-container-low border border-outline-variant rounded-xl overflow-hidden">
-              <div className="bg-container-high/40 px-3 py-2 border-b border-outline-variant text-[10px] text-outline font-bold flex items-center gap-1.5 font-sans">
+            <details className="mt-2">
+              <summary className="text-[10px] text-outline font-bold cursor-pointer flex items-center gap-1.5 font-sans">
                 <span className="material-symbols-outlined text-[14px]">bug_report</span>
-                NETWORK DIAGNOSTICS & RETRY INSPECTION
-              </div>
-              <div className="p-3 space-y-2 text-[10px]">
-                <div className="grid grid-cols-2 gap-2">
-                  <div><span className="text-outline">Request Method:</span> {task.debug_info.requestMethod}</div>
-                  <div><span className="text-outline">Response Status:</span> {task.debug_info.responseStatus}</div>
-                  <div className="col-span-2"><span className="text-outline">Redirect Chain ({task.debug_info.redirectChain.length} hops):</span></div>
-                  <div className="col-span-2 pl-4 text-[9px] text-outline leading-tight">
-                    {task.debug_info.redirectChain.map((url, i) => (
-                      <div key={i} className="truncate">• {url}</div>
-                    ))}
-                  </div>
-                </div>
-                <div className="pt-1.5 border-t border-outline-variant/30">
-                  <span className="text-outline block mb-1">Outgoing Headers:</span>
-                  <div className="max-h-24 overflow-y-auto pl-2 border-l border-outline-variant pr-1">
-                    {Object.entries(task.debug_info.requestHeaders || {}).map(([k, v]) => (
-                      <div key={k} className="truncate"><span className="text-outline">{k}:</span> {v}</div>
-                    ))}
+                Network Diagnostics
+              </summary>
+              <div className="mt-2 bg-container-low border border-outline-variant rounded-xl overflow-hidden">
+                <div className="p-3 space-y-2 text-[10px]">
+                  <div className="grid grid-cols-2 gap-2">
+                    <div><span className="text-outline">Method:</span> {task.debug_info.requestMethod}</div>
+                    <div><span className="text-outline">Status:</span> {task.debug_info.responseStatus}</div>
+                    <div className="col-span-2"><span className="text-outline">Redirect Chain ({task.debug_info.redirectChain.length} hops):</span></div>
+                    <div className="col-span-2 pl-4 text-[9px] text-outline leading-tight">
+                      {task.debug_info.redirectChain.map((url, i) => (
+                        <div key={i} className="truncate">• {url}</div>
+                      ))}
+                    </div>
                   </div>
                 </div>
               </div>
-            </div>
+            </details>
           )}
         </div>
       )}
