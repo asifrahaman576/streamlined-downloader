@@ -25,20 +25,6 @@ function getMimeIcon(mimeType: string, filename: string): string {
 }
 
 // ─── Main App Component ───────────────────────────────────────────────────────
-// Direct-to-disk download item (File System Access API)
-interface DirectDownload {
-  id: string;
-  url: string;
-  filename: string;
-  size: number;
-  downloaded: number;
-  speed: number;
-  status: "pending" | "extracting" | "downloading" | "completed" | "error" | "cancelled";
-  error?: string;
-  startedAt: number;
-  abortController?: AbortController;
-}
-
 export default function App() {
   const [downloads, setDownloads] = useState<DownloadTask[]>([]);
   const [inbox, setInbox] = useState<GrabbedLink[]>([]);
@@ -85,129 +71,29 @@ export default function App() {
   // Simulated Network load state
   const [networkLoad, setNetworkLoad] = useState<number[]>([10, 15, 12, 14, 11, 15, 13, 12, 10, 14]);
 
-  // ─── File System Access API: Direct-to-disk downloads ───
-  const [downloadDirHandle, setDownloadDirHandle] = useState<FileSystemDirectoryHandle | null>(null);
-  const [directDownloads, setDirectDownloads] = useState<DirectDownload[]>([]);
-  const hasFsApi = typeof window !== "undefined" && "showDirectoryPicker" in window;
-
   // Set light theme on body
   useEffect(() => {
     document.body.className = "bg-surface-bg text-on-surface";
   }, []);
 
-  // ─── Pick download folder (File System Access API) ───
-  const handlePickFolder = async () => {
-    if (!hasFsApi) {
-      showStatus("Your browser doesn't support direct folder access. Use Chrome or Edge.", "error");
-      return;
-    }
-    try {
-      const dirHandle = await (window as any).showDirectoryPicker({ mode: "readwrite" });
-      setDownloadDirHandle(dirHandle);
-      showStatus(`✓ Save folder set: "${dirHandle.name}" — downloads will go directly here!`, "success");
-    } catch (e: any) {
-      if (e.name !== "AbortError") {
-        showStatus("Could not access folder: " + e.message, "error");
+  // Keep track of tasks we have already auto-downloaded to avoid loops
+  const autoDownloadedRefs = useRef<Set<string>>(new Set());
+
+  useEffect(() => {
+    downloads.forEach((task) => {
+      if (task.status === "completed" && !autoDownloadedRefs.current.has(task.id)) {
+        autoDownloadedRefs.current.add(task.id);
+        
+        // Trigger browser native download
+        const link = document.createElement("a");
+        link.href = `/api/downloads/files/${task.id}`;
+        link.download = task.filename;
+        document.body.appendChild(link);
+        link.click();
+        document.body.removeChild(link);
       }
-    }
-  };
-
-  // ─── Core: stream file directly to disk with no Chrome download bar ───
-  const startDirectToDiskDownload = async (id: string, sourceUrl: string, dirHandle: FileSystemDirectoryHandle) => {
-    const abort = new AbortController();
-    setDirectDownloads(prev => prev.map(d => d.id === id ? { ...d, abortController: abort } : d));
-
-    try {
-      // Step 1: Connect to server streaming proxy (handles FuckingFast extraction)
-      setDirectDownloads(prev => prev.map(d => d.id === id ? { ...d, status: "extracting" } : d));
-      
-      const response = await fetch(`/api/stream-to-pc?url=${encodeURIComponent(sourceUrl)}`, {
-        signal: abort.signal,
-      });
-
-      if (!response.ok) {
-        throw new Error(`Server error ${response.status}: ${await response.text()}`);
-      }
-
-      // Step 2: Get filename and size from response headers
-      const contentDisp = response.headers.get("Content-Disposition") || "";
-      const fnMatch = contentDisp.match(/filename[*]?=(?:UTF-8'')?["']?([^"';\r\n]+)["']?/i);
-      const filename = fnMatch ? decodeURIComponent(fnMatch[1].trim()) : sourceUrl.split("/").pop()?.split("?")[0] || "download";
-      const totalSize = parseInt(response.headers.get("Content-Length") || "-1");
-
-      setDirectDownloads(prev => prev.map(d => d.id === id 
-        ? { ...d, filename, size: totalSize, status: "downloading" } 
-        : d
-      ));
-
-      // Step 3: Create file directly in chosen folder (no Chrome dialog!)
-      const safeFilename = filename.replace(/[\\/]/g, "_");
-      const fileHandle = await dirHandle.getFileHandle(safeFilename, { create: true });
-      const writable = await fileHandle.createWritable();
-
-      // Step 4: Stream bytes chunk-by-chunk directly to disk
-      const reader = response.body!.getReader();
-      let downloaded = 0;
-      let speedBytes = 0;
-      let lastSpeedTs = Date.now();
-
-      while (true) {
-        const { done, value } = await reader.read();
-        if (done) break;
-        if (abort.signal.aborted) {
-          await writable.abort();
-          return;
-        }
-
-        await writable.write(value);
-        downloaded += value.length;
-        speedBytes += value.length;
-
-        const now = Date.now();
-        const elapsed = now - lastSpeedTs;
-        if (elapsed >= 600) {
-          const speed = Math.round(speedBytes / (elapsed / 1000));
-          speedBytes = 0;
-          lastSpeedTs = now;
-          setDirectDownloads(prev => prev.map(d => d.id === id
-            ? { ...d, downloaded, speed }
-            : d
-          ));
-        } else {
-          setDirectDownloads(prev => prev.map(d => d.id === id
-            ? { ...d, downloaded }
-            : d
-          ));
-        }
-      }
-
-      await writable.close();
-
-      setDirectDownloads(prev => prev.map(d => d.id === id
-        ? { ...d, status: "completed", downloaded: totalSize > 0 ? totalSize : downloaded, speed: 0 }
-        : d
-      ));
-
-    } catch (err: any) {
-      if (err.name === "AbortError") {
-        setDirectDownloads(prev => prev.map(d => d.id === id ? { ...d, status: "cancelled", speed: 0 } : d));
-      } else {
-        setDirectDownloads(prev => prev.map(d => d.id === id
-          ? { ...d, status: "error", error: err.message, speed: 0 }
-          : d
-        ));
-      }
-    }
-  };
-
-  // Remove a completed/cancelled direct download from list
-  const removeDirect = (id: string) => {
-    setDirectDownloads(prev => {
-      const item = prev.find(d => d.id === id);
-      item?.abortController?.abort();
-      return prev.filter(d => d.id !== id);
     });
-  };
+  }, [downloads]);
 
   // Status alerts & toasts
   const showStatus = useCallback((text: string, type: "info" | "success" | "error" = "info") => {
@@ -381,7 +267,7 @@ export default function App() {
     }
   };
 
-  // Direct-to-PC download: uses File System Access API to write directly to disk
+  // Direct Queue injection form on dashboard
   const handleResolve = async () => {
     if (!urlInput.trim()) return;
 
@@ -395,74 +281,79 @@ export default function App() {
       return;
     }
 
-    // If File System Access API is available, use direct-to-disk mode
-    if (hasFsApi) {
-      let dirHandle = downloadDirHandle;
+    setAnalyzing(true);
+    showStatus(`Analyzing and resolving ${urls.length} download link(s)...`, "info");
 
-      // If no folder selected yet, prompt user to pick one NOW (must be in click handler)
-      if (!dirHandle) {
-        try {
-          dirHandle = await (window as any).showDirectoryPicker({ mode: "readwrite" });
-          setDownloadDirHandle(dirHandle);
-          showStatus(`✓ Save folder set to "${dirHandle!.name}"`, "success");
-        } catch (e: any) {
-          if (e.name !== "AbortError") showStatus("Folder access denied: " + e.message, "error");
-          return;
+    try {
+      // 1. Call analyze first to crawl and decode the real files
+      const analyzeRes = await fetch("/api/analyze", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ urls, url: urls[0], runAi: false }),
+      });
+      
+      let finalLinks: GrabbedLink[] = [];
+      if (analyzeRes.ok) {
+        const analyzeData = await analyzeRes.json();
+        if (analyzeData.links && analyzeData.links.length > 0) {
+          finalLinks = analyzeData.links;
         }
       }
 
-      setAnalyzing(true);
+      // If analyze couldn't extract anything (or failed), fall back to direct links parsed from URLs
+      if (finalLinks.length === 0) {
+        finalLinks = urls.map((url, index) => {
+          let filename = "";
+          try {
+            filename = new URL(url).pathname.split("/").pop() || `download_${index + 1}.bin`;
+          } catch (_) {
+            filename = url.split("/").pop() || `download_${index + 1}.bin`;
+          }
+          if (filename.includes("?")) filename = filename.split("?")[0];
+          if (!filename) filename = `download_${index + 1}.bin`;
+          
+          // Clean up FuckingFast default raw names
+          if (url.toLowerCase().includes("fuckingfast")) {
+            const id = filename;
+            filename = `fuckingfast_${id}.zip`;
+          }
 
-      // Add all URLs to the direct downloads list and kick off each download
-      const newItems: DirectDownload[] = urls.map((url, i) => ({
-        id: `dd_${Date.now()}_${i}`,
-        url,
-        filename: url.split("/").pop()?.split("?")[0] || "download",
-        size: -1,
-        downloaded: 0,
-        speed: 0,
-        status: "pending" as const,
-        startedAt: Date.now(),
-      }));
-
-      setDirectDownloads(prev => [...prev, ...newItems]);
-      setUrlInput("");
-      setAnalyzing(false);
-
-      // Start each download (runs in parallel, non-blocking)
-      newItems.forEach(item => {
-        startDirectToDiskDownload(item.id, item.url, dirHandle!);
-      });
-
-      showStatus(`Starting ${urls.length} direct download${urls.length > 1 ? "s" : ""} — files go straight to "${dirHandle!.name}"`, "success");
-      return;
-    }
-
-    // Fallback for non-supported browsers: use streaming proxy + Chrome download bar
-    setAnalyzing(true);
-    showStatus(`Starting ${urls.length} download${urls.length > 1 ? "s" : ""}...`, "info");
-    try {
-      for (let i = 0; i < urls.length; i++) {
-        const link = document.createElement("a");
-        link.href = `/api/stream-to-pc?url=${encodeURIComponent(urls[i])}`;
-        link.download = "";
-        link.style.display = "none";
-        document.body.appendChild(link);
-        link.click();
-        document.body.removeChild(link);
-        if (i < urls.length - 1) await new Promise(r => setTimeout(r, 800));
+          return {
+            id: `grab_manual_${Date.now()}_${index}_${Math.random().toString(36).substring(2, 5)}`,
+            url,
+            filename,
+            size: -1,
+            mimeType: "application/octet-stream",
+            resumable: true,
+            selected: true,
+            source: "direct-url",
+          };
+        });
       }
-      showStatus(`${urls.length} download${urls.length > 1 ? "s" : ""} started via browser`, "success");
-      setUrlInput("");
+
+      // 2. Add them directly to active queue and import
+      const addRes = await fetch("/api/inbox/manage", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "add_many", links: finalLinks }),
+      });
+      if (addRes.ok) {
+        // Automatically import selected links into active queue
+        await fetch("/api/inbox/manage", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ action: "import_selected" }),
+        });
+        showStatus(`Queued ${finalLinks.length} download task(s) successfully!`, "success");
+        setUrlInput("");
+        fetchState();
+      } else {
+        showStatus("Failed to queue direct links", "error");
+      }
     } catch (error) {
-      showStatus("Failed to start download", "error");
-    } finally {
-      setAnalyzing(false);
+      showStatus("Failed to submit direct downloads", "error");
     }
   };
-
-
-
 
   // Manage Link Grabber Inbox Staging Queue
   const toggleInboxSelect = async (id: string) => {
@@ -857,174 +748,36 @@ export default function App() {
             {/* Dashboard active Tab */}
             {activeTab === "dashboard" && (
               <>
-                {/* Download directly to PC — File System Access API */}
-                <div className="bg-surface border border-outline-variant rounded-xl overflow-hidden shadow-sm">
-                  {/* Header */}
-                  <div className="px-5 pt-5 pb-4 border-b border-outline-variant/50 bg-gradient-to-r from-accent/5 to-transparent">
-                    <div className="flex items-start justify-between gap-4">
-                      <div>
-                        <h2 className="text-sm font-bold text-on-surface flex items-center gap-2 mb-1">
-                          <span className="material-symbols-outlined text-accent text-[20px]">folder_open</span>
-                          Download Directly to Your PC
-                        </h2>
-                        <p className="text-[11px] text-on-surface-variant leading-relaxed">
-                          Files are written <strong>directly to your chosen folder</strong> — no Chrome download bar, no detours. 
-                          Pick a save folder once, then paste URLs to download.
-                        </p>
-                      </div>
-                      {/* Folder picker button */}
-                      <button
-                        onClick={handlePickFolder}
-                        className={`flex-shrink-0 flex items-center gap-2 text-xs font-bold px-3 py-2 rounded-lg border transition-all cursor-pointer ${
-                          downloadDirHandle
-                            ? "bg-accent/10 border-accent/30 text-accent hover:bg-accent/20"
-                            : "bg-container-high border-outline-variant text-on-surface hover:border-accent hover:text-accent"
-                        }`}
-                        title="Choose where files are saved"
-                      >
-                        <span className="material-symbols-outlined text-[18px]">
-                          {downloadDirHandle ? "folder_check" : "create_new_folder"}
-                        </span>
-                        <span className="hidden sm:block">
-                          {downloadDirHandle ? `📁 ${downloadDirHandle.name}` : "Set Save Folder"}
-                        </span>
-                      </button>
-                    </div>
-
-                    {/* No folder selected warning */}
-                    {!downloadDirHandle && hasFsApi && (
-                      <div className="mt-3 flex items-center gap-2 text-[10px] text-amber-700 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2">
-                        <span className="material-symbols-outlined text-[14px]">warning</span>
-                        Click <strong>"Set Save Folder"</strong> to choose where files are saved. It will ask the first time you download too.
-                      </div>
-                    )}
-                    {!hasFsApi && (
-                      <div className="mt-3 flex items-center gap-2 text-[10px] text-blue-700 bg-blue-50 border border-blue-200 rounded-lg px-3 py-2">
-                        <span className="material-symbols-outlined text-[14px]">info</span>
-                        Your browser doesn't support direct folder access. Files will download via browser's download bar. Use <strong>Chrome or Edge</strong> for the best experience.
-                      </div>
-                    )}
+                {/* Link input area */}
+                <div className="bg-surface border border-outline-variant rounded-xl p-5 shadow-sm">
+                  <h2 className="text-sm font-bold text-on-surface mb-3 flex items-center gap-2">
+                    <span className="material-symbols-outlined text-primary text-[20px]">bolt</span>
+                    Resolve & Queue Links
+                  </h2>
+                  <div className="text-xs text-on-surface-variant mb-3 leading-relaxed">
+                    Paste FuckingFast or direct file URLs (one per line). Files queue automatically in the multithreaded server-side downloader.
                   </div>
-
-                  {/* URL input */}
-                  <div className="p-5">
-                    <textarea 
-                      rows={3}
-                      value={urlInput}
-                      onChange={(e) => setUrlInput(e.target.value)}
-                      onKeyDown={(e) => { if (e.ctrlKey && e.key === "Enter") handleResolve(); }}
-                      placeholder={"https://fuckingfast.co/abc123\nhttps://fuckingfast.co/xyz789\n\nPaste one or more URLs, one per line..."}
-                      className="w-full text-xs font-mono bg-container-low border border-outline-variant rounded-lg p-3 outline-none focus:border-accent resize-none transition-colors"
-                    />
-                    <div className="flex items-center justify-between mt-3">
-                      <span className="text-[10px] text-on-surface-variant font-mono">
-                        {linesCount} link{linesCount !== 1 ? "s" : ""} • Ctrl+Enter to download
-                      </span>
-                      <button 
-                        onClick={handleResolve}
-                        disabled={analyzing || linesCount === 0}
-                        className="bg-accent hover:brightness-110 text-white text-xs font-bold px-5 py-2 rounded-lg flex items-center gap-2 transition-all shadow-sm disabled:opacity-40 cursor-pointer"
-                      >
-                        {analyzing ? (
-                          <>
-                            <div className="w-3.5 h-3.5 border-2 border-white border-t-transparent rounded-full animate-spin"></div>
-                            Starting...
-                          </>
-                        ) : (
-                          <>
-                            <span className="material-symbols-outlined text-[16px]">download_for_offline</span>
-                            Download to My PC
-                          </>
-                        )}
-                      </button>
-                    </div>
+                  <textarea 
+                    rows={3}
+                    value={urlInput}
+                    onChange={(e) => setUrlInput(e.target.value)}
+                    placeholder="https://fuckingfast.co/..."
+                    className="w-full text-xs font-mono bg-container-low border border-outline-variant rounded-lg p-3 outline-none focus:border-accent resize-none transition-colors"
+                  />
+                  <div className="flex items-center justify-between mt-3">
+                    <span className="text-[10px] text-on-surface-variant font-mono">
+                      {linesCount} link(s) detected • Ctrl+Enter to resolve
+                    </span>
+                    <button 
+                      onClick={handleResolve}
+                      disabled={linesCount === 0}
+                      className="bg-primary hover:bg-inverse-surface text-on-primary text-xs font-bold px-4 py-2 rounded-lg flex items-center gap-1.5 transition-all shadow-sm disabled:opacity-40 cursor-pointer"
+                    >
+                      <span className="material-symbols-outlined text-[16px]">add</span>
+                      Queue Downloads
+                    </button>
                   </div>
                 </div>
-
-                {/* Direct Downloads List — real-time in-app progress, no Chrome bar */}
-                {directDownloads.length > 0 && (
-                  <div className="bg-surface border border-outline-variant rounded-xl overflow-hidden shadow-sm">
-                    <div className="flex items-center justify-between px-4 h-header-height border-b border-outline-variant bg-container-high/50">
-                      <div className="flex items-center gap-3">
-                        <span className="material-symbols-outlined text-accent">download_for_offline</span>
-                        <span className="text-body-md font-bold">Downloads</span>
-                        <span className="text-[10px] bg-accent/10 text-accent px-2 py-0.5 rounded-full font-bold">
-                          {directDownloads.filter(d => d.status === "downloading").length} active
-                        </span>
-                      </div>
-                      <button
-                        onClick={() => setDirectDownloads(prev => prev.filter(d => d.status === "downloading" || d.status === "pending" || d.status === "extracting"))}
-                        className="text-[10px] text-on-surface-variant hover:text-on-surface px-2 py-1 rounded cursor-pointer"
-                      >
-                        Clear finished
-                      </button>
-                    </div>
-                    <div className="divide-y divide-outline-variant/30">
-                      {directDownloads.map(dl => {
-                        const pct = dl.size > 0 ? Math.round((dl.downloaded / dl.size) * 100) : -1;
-                        const isActive = dl.status === "downloading" || dl.status === "extracting";
-                        const isDone = dl.status === "completed";
-                        const isErr = dl.status === "error";
-                        return (
-                          <div key={dl.id} className={`flex items-center px-4 gap-3 min-h-[52px] py-2 ${isErr ? "border-l-4 border-error" : isDone ? "border-l-4 border-accent" : ""}`}>
-                            {/* Icon */}
-                            <span className={`material-symbols-outlined text-[20px] flex-shrink-0 ${
-                              isActive ? "animate-spin text-accent" :
-                              isDone ? "text-accent" :
-                              isErr ? "text-error" : "text-on-surface-variant"
-                            }`}>
-                              {isDone ? "check_circle" : isErr ? "error" : isActive ? "downloading" : "pending"}
-                            </span>
-
-                            {/* Filename + progress bar */}
-                            <div className="flex-1 min-w-0">
-                              <div className="text-xs font-medium text-on-surface truncate" title={dl.filename}>
-                                {dl.filename}
-                              </div>
-                              {(isActive || isDone) && (
-                                <div className="flex items-center gap-2 mt-1">
-                                  <div className="flex-1 h-1 bg-container-highest rounded-full overflow-hidden">
-                                    <div
-                                      className={`h-full transition-all duration-300 ${isDone ? "bg-accent" : "bg-accent"} ${dl.status === "extracting" ? "animate-pulse" : ""}`}
-                                      style={{ width: isDone ? "100%" : pct >= 0 ? `${pct}%` : "15%" }}
-                                    />
-                                  </div>
-                                  <span className={`text-[9px] font-mono font-bold flex-shrink-0 ${isDone ? "text-accent" : "text-on-surface-variant"}`}>
-                                    {isDone ? "100%" : pct >= 0 ? `${pct}%` : dl.status === "extracting" ? "…" : "--"}
-                                  </span>
-                                </div>
-                              )}
-                              {isErr && <div className="text-[9px] text-error mt-0.5 truncate">{dl.error}</div>}
-                            </div>
-
-                            {/* Speed / size / status */}
-                            <div className="text-[10px] text-on-surface-variant text-right flex-shrink-0 w-[120px] hidden sm:block">
-                              {dl.status === "extracting" && <span className="text-amber-600 font-semibold animate-pulse">Resolving link...</span>}
-                              {dl.status === "downloading" && (
-                                <div>
-                                  <div className="font-bold text-accent">{dl.speed > 0 ? `${formatBytes(dl.speed)}/s` : "Connecting..."}</div>
-                                  <div className="text-[9px]">{formatBytes(dl.downloaded)}{dl.size > 0 ? ` / ${formatBytes(dl.size)}` : ""}</div>
-                                </div>
-                              )}
-                              {isDone && <span className="text-accent font-bold">Saved ✓ {dl.size > 0 ? formatBytes(dl.size) : ""}</span>}
-                              {isErr && <span className="text-error font-bold">Failed</span>}
-                              {dl.status === "cancelled" && <span className="text-on-surface-variant">Cancelled</span>}
-                            </div>
-
-                            {/* Cancel / remove button */}
-                            <button
-                              onClick={() => removeDirect(dl.id)}
-                              className="p-1.5 hover:bg-container-highest rounded text-on-surface-variant cursor-pointer flex-shrink-0"
-                              title={isActive ? "Cancel download" : "Remove"}
-                            >
-                              <span className="material-symbols-outlined text-[16px]">{isActive ? "stop_circle" : "close"}</span>
-                            </button>
-                          </div>
-                        );
-                      })}
-                    </div>
-                  </div>
-                )}
 
                 {/* Queue Card */}
                 <div className="bg-surface border border-outline-variant rounded-xl overflow-hidden shadow-sm">
@@ -1072,7 +825,6 @@ export default function App() {
                            key={task.id}
                            task={task}
                            expanded={expandedTaskId === task.id}
-                           isSavingToPc={savingToPcIds.has(task.id)}
                            onToggleExpand={() => setExpandedTaskId(expandedTaskId === task.id ? null : task.id)}
                            onStart={() => handleTaskAction(task.id, "start")}
                            onPause={() => handleTaskAction(task.id, "pause")}
@@ -1764,7 +1516,6 @@ function PackageGroupRow({ packageName, tasks, expandedTaskId, onToggleExpand, o
               key={task.id}
               task={task}
               expanded={expandedTaskId === task.id}
-              isSavingToPc={false}
               onToggleExpand={() => onToggleExpand(task.id)}
               onStart={() => onStart(task.id)}
               onPause={() => onPause(task.id)}
@@ -1783,7 +1534,6 @@ function PackageGroupRow({ packageName, tasks, expandedTaskId, onToggleExpand, o
 interface TaskRowProps {
   task: DownloadTask;
   expanded: boolean;
-  isSavingToPc: boolean;
   onToggleExpand: () => void;
   onStart: () => void;
   onPause: () => void;
@@ -1795,7 +1545,6 @@ interface TaskRowProps {
 function TaskRowItem({
   task,
   expanded,
-  isSavingToPc,
   onToggleExpand,
   onStart,
   onPause,
@@ -1803,27 +1552,23 @@ function TaskRowItem({
   onDelete,
   isGroupChild,
 }: TaskRowProps) {
-  // When completed, always show 100% — polling lag can cause the last value to be 98-99%
-  const rawPercentage = task.size > 0 ? Math.round((task.downloaded / task.size) * 100) : -1;
-  const isCompleted = task.status === "completed";
-  const percentage = isCompleted ? (task.size > 0 ? 100 : -1) : rawPercentage;
-
+  const percentage = task.size > 0 ? Math.round((task.downloaded / task.size) * 100) : -1;
   const isDownloading = task.status === "downloading";
   const isQueued = task.status === "queued";
   const isPaused = task.status === "paused";
+  const isCompleted = task.status === "completed";
   const isError = task.status === "error";
   const isExtracting = task.status === "extracting";
 
   const getStatusLabel = () => {
-    if (isSavingToPc) return "↓ Saving to PC...";
     if (isDownloading) {
-      const spd = task.speed > 0 ? formatBytes(task.speed) + "/s" : "Connecting...";
-      return spd;
+      const spd = task.speed > 0 ? formatBytes(task.speed) + "/s" : "connecting...";
+      return `${spd}`;
     }
     if (isQueued) return "Queued";
     if (isPaused) return "Paused";
-    if (isCompleted) return "Saved to PC ✓";
-    if (isError) return task.error ? `Error: ${task.error.slice(0, 40)}` : "Error";
+    if (isCompleted) return "Completed ✓";
+    if (isError) return task.error ? `Error: ${task.error.slice(0, 30)}` : "Error";
     if (isExtracting) return "Resolving link...";
     return task.status;
   };
@@ -1837,11 +1582,11 @@ function TaskRowItem({
     return "bg-accent";
   };
 
-  // Progress bar width — completed always 100%, unknown size shows animated pulse
-  const progressWidth = isCompleted ? "100%" : (percentage >= 0 ? `${percentage}%` : (isDownloading || isExtracting ? "100%" : "0%"));
-  const progressClass = !isCompleted && percentage < 0 && (isDownloading || isExtracting)
+  // Progress width: use actual percentage if size known, show animated stripe if not
+  const progressWidth = percentage >= 0 ? `${percentage}%` : isDownloading || isExtracting ? "100%" : "0%";
+  const progressClass = percentage < 0 && (isDownloading || isExtracting)
     ? `${getProgressBarColor()} animate-pulse opacity-40`
-    : `${getProgressBarColor()} progress-glow transition-all duration-500`;
+    : `${getProgressBarColor()} progress-glow`;
 
   const iconName = getMimeIcon(task.mimeType, task.filename);
 
@@ -1877,23 +1622,16 @@ function TaskRowItem({
           <div className="flex-1 h-1.5 bg-container-highest rounded-full overflow-hidden">
             <div 
               style={{ width: progressWidth }}
-              className={`h-full ${progressClass}`}
+              className={`h-full transition-all duration-500 ${progressClass}`}
             />
           </div>
-          <span className={`text-label-mono w-10 text-right flex-shrink-0 font-bold ${
-            isCompleted ? "text-accent" : "text-on-surface-variant"
-          }`}>
-            {isCompleted ? "100%" : (percentage >= 0 ? `${percentage}%` : "--")}
+          <span className="text-label-mono text-on-surface-variant w-10 text-right flex-shrink-0">
+            {percentage >= 0 ? `${percentage}%` : isCompleted ? "100%" : "--"}
           </span>
         </div>
 
         {/* Status text */}
-        <div className={`w-[160px] text-[10px] text-right flex-shrink-0 hidden sm:block truncate pr-2 ${
-          isSavingToPc ? "text-blue-600 font-bold animate-pulse" :
-          isCompleted ? "text-accent font-semibold" :
-          isError ? "text-error" :
-          "text-on-surface-variant"
-        }`}>
+        <div className="w-[160px] text-[10px] text-on-surface-variant text-right flex-shrink-0 hidden sm:block truncate pr-2">
           {getStatusLabel()}
         </div>
 
