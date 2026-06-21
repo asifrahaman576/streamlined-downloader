@@ -71,26 +71,71 @@ export default function App() {
   // Simulated Network load state
   const [networkLoad, setNetworkLoad] = useState<number[]>([10, 15, 12, 14, 11, 15, 13, 12, 10, 14]);
 
+  // ─── Save-to-folder state (File System Access API) ───
+  // When set, completed downloads are silently written here — no Chrome bar.
+  const [downloadDirHandle, setDownloadDirHandle] = useState<FileSystemDirectoryHandle | null>(null);
+  const [savingToPcSet, setSavingToPcSet] = useState<Set<string>>(new Set());
+  const hasFsApi = typeof window !== "undefined" && "showDirectoryPicker" in window;
+
+  // Let user pick a save folder
+  const handlePickSaveFolder = async () => {
+    try {
+      const dir = await (window as any).showDirectoryPicker({ mode: "readwrite" });
+      setDownloadDirHandle(dir);
+      showStatus(`✓ Save folder set: "${dir.name}" — completed downloads will go here automatically`, "success");
+    } catch (e: any) {
+      if (e.name !== "AbortError") showStatus("Could not access folder: " + e.message, "error");
+    }
+  };
+
   // Set light theme on body
   useEffect(() => {
     document.body.className = "bg-surface-bg text-on-surface";
   }, []);
 
-  // Keep track of tasks we have already auto-downloaded to avoid loops
+  // Auto-save completed downloads — uses File System Access API (no Chrome bar) when folder is set
   const autoDownloadedRefs = useRef<Set<string>>(new Set());
+  const downloadDirHandleRef = useRef<FileSystemDirectoryHandle | null>(null);
+  useEffect(() => { downloadDirHandleRef.current = downloadDirHandle; }, [downloadDirHandle]);
 
   useEffect(() => {
     downloads.forEach((task) => {
       if (task.status === "completed" && !autoDownloadedRefs.current.has(task.id)) {
         autoDownloadedRefs.current.add(task.id);
-        
-        // Trigger browser native download
-        const link = document.createElement("a");
-        link.href = `/api/downloads/files/${task.id}`;
-        link.download = task.filename;
-        document.body.appendChild(link);
-        link.click();
-        document.body.removeChild(link);
+        const dirHandle = downloadDirHandleRef.current;
+
+        if (hasFsApi && dirHandle) {
+          // ── DIRECT TO DISK: no Chrome download bar ──
+          setSavingToPcSet(prev => new Set([...prev, task.id]));
+          (async () => {
+            try {
+              const response = await fetch(`/api/downloads/files/${task.id}`);
+              if (!response.ok) throw new Error("Server error " + response.status);
+              const safeFilename = task.filename.replace(/[\\/]/g, "_");
+              const fileHandle = await dirHandle.getFileHandle(safeFilename, { create: true });
+              const writable = await fileHandle.createWritable();
+              const reader = response.body!.getReader();
+              while (true) {
+                const { done, value } = await reader.read();
+                if (done) break;
+                await writable.write(value);
+              }
+              await writable.close();
+            } catch (err: any) {
+              console.error("Auto-save failed:", err.message);
+            } finally {
+              setSavingToPcSet(prev => { const s = new Set(prev); s.delete(task.id); return s; });
+            }
+          })();
+        } else {
+          // ── FALLBACK: open Chrome's download bar (no folder set) ──
+          const link = document.createElement("a");
+          link.href = `/api/downloads/files/${task.id}`;
+          link.download = task.filename;
+          document.body.appendChild(link);
+          link.click();
+          document.body.removeChild(link);
+        }
       }
     });
   }, [downloads]);
@@ -749,33 +794,67 @@ export default function App() {
             {activeTab === "dashboard" && (
               <>
                 {/* Link input area */}
-                <div className="bg-surface border border-outline-variant rounded-xl p-5 shadow-sm">
-                  <h2 className="text-sm font-bold text-on-surface mb-3 flex items-center gap-2">
-                    <span className="material-symbols-outlined text-primary text-[20px]">bolt</span>
-                    Resolve & Queue Links
-                  </h2>
-                  <div className="text-xs text-on-surface-variant mb-3 leading-relaxed">
-                    Paste FuckingFast or direct file URLs (one per line). Files queue automatically in the multithreaded server-side downloader.
-                  </div>
-                  <textarea 
-                    rows={3}
-                    value={urlInput}
-                    onChange={(e) => setUrlInput(e.target.value)}
-                    placeholder="https://fuckingfast.co/..."
-                    className="w-full text-xs font-mono bg-container-low border border-outline-variant rounded-lg p-3 outline-none focus:border-accent resize-none transition-colors"
-                  />
-                  <div className="flex items-center justify-between mt-3">
-                    <span className="text-[10px] text-on-surface-variant font-mono">
-                      {linesCount} link(s) detected • Ctrl+Enter to resolve
+                <div className="bg-surface border border-outline-variant rounded-xl overflow-hidden shadow-sm">
+                  {/* Save folder row */}
+                  <div className={`flex items-center gap-3 px-5 py-3 border-b ${
+                    downloadDirHandle
+                      ? "bg-accent/5 border-accent/20"
+                      : "bg-amber-50 border-amber-200"
+                  }`}>
+                    <span className={`material-symbols-outlined text-[18px] ${downloadDirHandle ? "text-accent" : "text-amber-600"}`}>
+                      {downloadDirHandle ? "folder_check" : "folder_open"}
                     </span>
-                    <button 
-                      onClick={handleResolve}
-                      disabled={linesCount === 0}
-                      className="bg-primary hover:bg-inverse-surface text-on-primary text-xs font-bold px-4 py-2 rounded-lg flex items-center gap-1.5 transition-all shadow-sm disabled:opacity-40 cursor-pointer"
-                    >
-                      <span className="material-symbols-outlined text-[16px]">add</span>
-                      Queue Downloads
-                    </button>
+                    <span className={`text-[11px] flex-1 ${downloadDirHandle ? "text-accent font-semibold" : "text-amber-700"}`}>
+                      {downloadDirHandle
+                        ? `Save folder: "${downloadDirHandle.name}" — files go directly here when done`
+                        : hasFsApi
+                          ? "Set a save folder so files download directly to your PC (no Chrome bar)"
+                          : "Use Chrome or Edge for direct-to-PC downloads"}
+                    </span>
+                    {hasFsApi && (
+                      <button
+                        onClick={handlePickSaveFolder}
+                        className={`text-[11px] font-bold px-3 py-1.5 rounded-lg border transition-all cursor-pointer flex items-center gap-1.5 ${
+                          downloadDirHandle
+                            ? "bg-accent/10 border-accent/30 text-accent hover:bg-accent/20"
+                            : "bg-white border-amber-300 text-amber-700 hover:border-accent hover:text-accent"
+                        }`}
+                      >
+                        <span className="material-symbols-outlined text-[14px]">create_new_folder</span>
+                        {downloadDirHandle ? "Change Folder" : "Set Save Folder"}
+                      </button>
+                    )}
+                  </div>
+
+                  <div className="p-5">
+                    <h2 className="text-sm font-bold text-on-surface mb-3 flex items-center gap-2">
+                      <span className="material-symbols-outlined text-primary text-[20px]">bolt</span>
+                      Resolve &amp; Queue Links
+                    </h2>
+                    <div className="text-xs text-on-surface-variant mb-3 leading-relaxed">
+                      Paste FuckingFast or direct file URLs (one per line). The website downloads them for you — files save automatically to your chosen folder when done.
+                    </div>
+                    <textarea 
+                      rows={3}
+                      value={urlInput}
+                      onChange={(e) => setUrlInput(e.target.value)}
+                      onKeyDown={(e) => { if (e.ctrlKey && e.key === "Enter") handleResolve(); }}
+                      placeholder="https://fuckingfast.co/..."
+                      className="w-full text-xs font-mono bg-container-low border border-outline-variant rounded-lg p-3 outline-none focus:border-accent resize-none transition-colors"
+                    />
+                    <div className="flex items-center justify-between mt-3">
+                      <span className="text-[10px] text-on-surface-variant font-mono">
+                        {linesCount} link(s) detected • Ctrl+Enter to queue
+                      </span>
+                      <button 
+                        onClick={handleResolve}
+                        disabled={linesCount === 0}
+                        className="bg-primary hover:bg-inverse-surface text-on-primary text-xs font-bold px-4 py-2 rounded-lg flex items-center gap-1.5 transition-all shadow-sm disabled:opacity-40 cursor-pointer"
+                      >
+                        <span className="material-symbols-outlined text-[16px]">add</span>
+                        Queue Downloads
+                      </button>
+                    </div>
                   </div>
                 </div>
 
@@ -825,6 +904,7 @@ export default function App() {
                            key={task.id}
                            task={task}
                            expanded={expandedTaskId === task.id}
+                           isSavingToPc={savingToPcSet.has(task.id)}
                            onToggleExpand={() => setExpandedTaskId(expandedTaskId === task.id ? null : task.id)}
                            onStart={() => handleTaskAction(task.id, "start")}
                            onPause={() => handleTaskAction(task.id, "pause")}
@@ -1534,6 +1614,7 @@ function PackageGroupRow({ packageName, tasks, expandedTaskId, onToggleExpand, o
 interface TaskRowProps {
   task: DownloadTask;
   expanded: boolean;
+  isSavingToPc?: boolean;
   onToggleExpand: () => void;
   onStart: () => void;
   onPause: () => void;
@@ -1545,6 +1626,7 @@ interface TaskRowProps {
 function TaskRowItem({
   task,
   expanded,
+  isSavingToPc = false,
   onToggleExpand,
   onStart,
   onPause,
@@ -1561,13 +1643,13 @@ function TaskRowItem({
   const isExtracting = task.status === "extracting";
 
   const getStatusLabel = () => {
+    if (isSavingToPc) return "↓ Saving to PC...";
     if (isDownloading) {
-      const spd = task.speed > 0 ? formatBytes(task.speed) + "/s" : "connecting...";
-      return `${spd}`;
+      const spd = task.speed > 0 ? formatBytes(task.speed) + "/s" : "Connecting...";
+      return spd;
     }
     if (isQueued) return "Queued";
     if (isPaused) return "Paused";
-    if (isCompleted) return "Completed ✓";
     if (isError) return task.error ? `Error: ${task.error.slice(0, 30)}` : "Error";
     if (isExtracting) return "Resolving link...";
     return task.status;
@@ -1631,7 +1713,12 @@ function TaskRowItem({
         </div>
 
         {/* Status text */}
-        <div className="w-[160px] text-[10px] text-on-surface-variant text-right flex-shrink-0 hidden sm:block truncate pr-2">
+        <div className={`w-[160px] text-[10px] text-right flex-shrink-0 hidden sm:block truncate pr-2 ${
+          isSavingToPc ? "text-blue-600 font-bold animate-pulse" :
+          isCompleted ? "text-accent font-semibold" :
+          isError ? "text-error" :
+          "text-on-surface-variant"
+        }`}>
           {getStatusLabel()}
         </div>
 
