@@ -102,10 +102,13 @@ export class FuckingFastExtractor implements HostExtractor {
 
     // Try to parse the filename from title or HTML
     const titleMatch = stdout.match(/<title>([^<]+)<\/title>/);
-    let filename = titleMatch ? titleMatch[1].trim() : `${id}.rar`;
+    let filename = titleMatch ? titleMatch[1].trim() : `fuckingfast_${id}.zip`;
     
-    // Clean up filename from title
+    // Clean up filename from title and bypass Cloudflare security placeholders
     filename = filename.replace(/["'\\/]/g, "_");
+    if (filename.toLowerCase().includes("just a moment") || filename.toLowerCase().includes("cloudflare")) {
+      filename = `fuckingfast_${id}.zip`;
+    }
 
     // Try to parse the size
     let sizeBytes = -1;

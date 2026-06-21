@@ -76,6 +76,25 @@ export default function App() {
     document.body.className = "bg-surface-bg text-on-surface";
   }, []);
 
+  // Keep track of tasks we have already auto-downloaded to avoid loops
+  const autoDownloadedRefs = useRef<Set<string>>(new Set());
+
+  useEffect(() => {
+    downloads.forEach((task) => {
+      if (task.status === "completed" && !autoDownloadedRefs.current.has(task.id)) {
+        autoDownloadedRefs.current.add(task.id);
+        
+        // Trigger browser native download
+        const link = document.createElement("a");
+        link.href = `/api/downloads/files/${task.id}`;
+        link.download = task.filename;
+        document.body.appendChild(link);
+        link.click();
+        document.body.removeChild(link);
+      }
+    });
+  }, [downloads]);
+
   // Status alerts & toasts
   const showStatus = useCallback((text: string, type: "info" | "success" | "error" = "info") => {
     setStatusMsg({ text, type });
@@ -262,43 +281,70 @@ export default function App() {
       return;
     }
 
-    const mockLinks: GrabbedLink[] = urls.map((url, index) => {
-      let filename = "";
-      try {
-        filename = new URL(url).pathname.split("/").pop() || `manual_file_${index + 1}.bin`;
-      } catch (_) {
-        filename = url.split("/").pop() || `manual_file_${index + 1}.bin`;
-      }
-      if (filename.includes("?")) filename = filename.split("?")[0];
-      if (!filename) filename = `manual_file_${index + 1}.bin`;
-
-      return {
-        id: `grab_manual_${Date.now()}_${index}_${Math.random().toString(36).substring(2, 5)}`,
-        url,
-        filename,
-        size: -1,
-        mimeType: "application/octet-stream",
-        resumable: true,
-        selected: true,
-        source: "direct-url",
-      };
-    });
+    setAnalyzing(true);
+    showStatus(`Analyzing and resolving ${urls.length} download link(s)...`, "info");
 
     try {
-      showStatus(`Enqueueing ${mockLinks.length} target link(s) for server-side download...`, "info");
+      // 1. Call analyze first to crawl and decode the real files
+      const analyzeRes = await fetch("/api/analyze", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ urls, url: urls[0], runAi: false }),
+      });
+      
+      let finalLinks: GrabbedLink[] = [];
+      if (analyzeRes.ok) {
+        const analyzeData = await analyzeRes.json();
+        if (analyzeData.links && analyzeData.links.length > 0) {
+          finalLinks = analyzeData.links;
+        }
+      }
+
+      // If analyze couldn't extract anything (or failed), fall back to direct links parsed from URLs
+      if (finalLinks.length === 0) {
+        finalLinks = urls.map((url, index) => {
+          let filename = "";
+          try {
+            filename = new URL(url).pathname.split("/").pop() || `download_${index + 1}.bin`;
+          } catch (_) {
+            filename = url.split("/").pop() || `download_${index + 1}.bin`;
+          }
+          if (filename.includes("?")) filename = filename.split("?")[0];
+          if (!filename) filename = `download_${index + 1}.bin`;
+          
+          // Clean up FuckingFast default raw names
+          if (url.toLowerCase().includes("fuckingfast")) {
+            const id = filename;
+            filename = `fuckingfast_${id}.zip`;
+          }
+
+          return {
+            id: `grab_manual_${Date.now()}_${index}_${Math.random().toString(36).substring(2, 5)}`,
+            url,
+            filename,
+            size: -1,
+            mimeType: "application/octet-stream",
+            resumable: true,
+            selected: true,
+            source: "direct-url",
+          };
+        });
+      }
+
+      // 2. Add them directly to active queue and import
       const addRes = await fetch("/api/inbox/manage", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ action: "add_many", links: mockLinks }),
+        body: JSON.stringify({ action: "add_many", links: finalLinks }),
       });
       if (addRes.ok) {
-        // Automatically import selected
+        // Automatically import selected links into active queue
         await fetch("/api/inbox/manage", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ action: "import_selected" }),
         });
-        showStatus(`Queued ${mockLinks.length} download task(s) successfully!`, "success");
+        showStatus(`Queued ${finalLinks.length} download task(s) successfully!`, "success");
         setUrlInput("");
         fetchState();
       } else {
@@ -522,15 +568,6 @@ export default function App() {
               <span className="material-symbols-outlined text-[20px]">download</span>
               Downloads
             </button>
-            <button 
-              onClick={() => { setActiveTab("dashboard"); setFilterStatus("completed"); }}
-              className={`h-full px-4 border-b-2 font-bold flex items-center gap-2 cursor-pointer transition-colors ${
-                activeTab === "dashboard" && filterStatus === "completed" ? "border-primary text-primary" : "border-transparent text-on-surface-variant hover:text-primary"
-              }`}
-            >
-              <span className="material-symbols-outlined text-[20px]">history</span>
-              Completed
-            </button>
           </div>
         </div>
         <div className="flex items-center gap-2">
@@ -740,128 +777,23 @@ export default function App() {
                       </div>
                       <h4 className="font-bold text-on-surface text-sm">Download queue is empty</h4>
                       <p className="text-xs text-on-surface-variant mt-1.5 leading-relaxed">
-                        Submit direct download links above or crawl webpage indices using the <b>Link Grabber</b> page.
+                        Submit download links above to begin.
                       </p>
                     </div>
                   ) : (
                     <div className="divide-y divide-outline-variant/30">
                       {filteredDownloads.map((task) => (
                         <TaskRowItem 
-                          key={task.id}
-                          task={task}
-                          expanded={expandedTaskId === task.id}
-                          onToggleExpand={() => setExpandedTaskId(expandedTaskId === task.id ? null : task.id)}
-                          onStart={() => handleTaskAction(task.id, "start")}
-                          onPause={() => handleTaskAction(task.id, "pause")}
-                          onRetry={() => handleTaskAction(task.id, "retry")}
-                          onDelete={() => handleTaskAction(task.id, "delete")}
+                           key={task.id}
+                           task={task}
+                           expanded={expandedTaskId === task.id}
+                           onToggleExpand={() => setExpandedTaskId(expandedTaskId === task.id ? null : task.id)}
+                           onStart={() => handleTaskAction(task.id, "start")}
+                           onPause={() => handleTaskAction(task.id, "pause")}
+                           onRetry={() => handleTaskAction(task.id, "retry")}
+                           onDelete={() => handleTaskAction(task.id, "delete")}
                         />
                       ))}
-                    </div>
-                  )}
-                </div>
-
-                {/* Staged Grabbed Links List (Integrated Inline Link Grabber Inbox) */}
-                <div className="bg-surface border border-outline-variant rounded-xl overflow-hidden shadow-sm">
-                  <div className="px-4 py-3 bg-container-high/50 border-b border-outline-variant flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
-                    <div>
-                      <h3 className="font-bold text-on-surface text-body-md flex items-center gap-2">
-                        <span className="material-symbols-outlined text-amber-500">star</span>
-                        Staged Grabbed Files Inbox ({inbox.length})
-                      </h3>
-                      <p className="text-xs text-on-surface-variant mt-0.5">Choose elements to import into active scheduler downloads queue.</p>
-                    </div>
-
-                    {inbox.length > 0 && (
-                      <div className="flex items-center gap-2">
-                        <button 
-                          onClick={clearInbox}
-                          className="text-xs bg-surface hover:bg-container-high border border-outline-variant text-on-surface-variant px-3 py-1.5 rounded-lg transition-colors cursor-pointer"
-                        >
-                          Clear Inbox
-                        </button>
-                        <button 
-                          onClick={importGrabbedToDownloads}
-                          className="text-xs bg-accent hover:brightness-110 text-white font-bold px-3 py-1.5 rounded-lg flex items-center gap-1 transition-colors shadow-sm cursor-pointer"
-                        >
-                          Import Selected ({inbox.filter(l => l.selected).length})
-                        </button>
-                      </div>
-                    )}
-                  </div>
-
-                  {inbox.length === 0 ? (
-                    <div className="p-8 text-center max-w-md mx-auto">
-                      <div className="bg-container-high w-10 h-10 rounded-full flex items-center justify-center mx-auto mb-3 border border-outline-variant text-on-surface-variant">
-                        <span className="material-symbols-outlined text-[20px]">public</span>
-                      </div>
-                      <h4 className="font-bold text-on-surface text-xs">No links staged yet</h4>
-                      <p className="text-[11px] text-on-surface-variant mt-1 leading-relaxed">
-                        Crawl webpage indices or paste hosting links in the box above to analyze and stage files here.
-                      </p>
-                    </div>
-                  ) : (
-                    <div className="overflow-x-auto">
-                      <table className="w-full text-left text-xs text-on-surface-variant">
-                        <thead className="bg-container-high/40 text-[10px] uppercase text-outline tracking-wider border-b border-outline-variant">
-                          <tr>
-                            <th className="px-4 py-2.5 text-center w-12">
-                              <input 
-                                type="checkbox"
-                                checked={inbox.every(l => l.selected)}
-                                onChange={() => {
-                                  const allSel = inbox.every(l => l.selected);
-                                  setInbox(inbox.map(l => ({ ...l, selected: !allSel })));
-                                }}
-                                className="rounded border-outline-variant bg-surface text-accent focus:ring-0 cursor-pointer"
-                              />
-                            </th>
-                            <th className="px-4 py-2.5">File details</th>
-                            <th className="px-4 py-2.5">MIME-Type</th>
-                            <th className="px-4 py-2.5">Size</th>
-                            <th className="px-4 py-2.5">Source</th>
-                          </tr>
-                        </thead>
-                        <tbody className="divide-y divide-outline-variant/30 bg-surface">
-                          {inbox.map((link) => (
-                            <tr key={link.id} className="hover:bg-container-low/40 transition-colors">
-                              <td className="px-4 py-2.5 text-center">
-                                <input 
-                                  type="checkbox"
-                                  checked={link.selected}
-                                  onChange={() => toggleInboxSelect(link.id)}
-                                  className="rounded border-outline-variant bg-surface text-accent focus:ring-0 cursor-pointer"
-                                />
-                              </td>
-                              <td className="px-4 py-2.5 max-w-sm">
-                                <p className="font-bold text-on-surface truncate" title={link.filename}>
-                                  {link.filename}
-                                </p>
-                                <p className="text-[10px] text-outline font-mono mt-0.5 truncate break-all block">
-                                  {link.url}
-                                </p>
-                              </td>
-                              <td className="px-4 py-2.5">
-                                <span className="bg-container-high text-on-surface-variant px-1.5 py-0.5 rounded text-[10px] font-mono border border-outline-variant">
-                                  {link.mimeType || "application/octet-stream"}
-                                </span>
-                              </td>
-                              <td className="px-4 py-2.5 text-on-surface font-bold font-mono">
-                                {formatBytes(link.size)}
-                              </td>
-                              <td className="px-4 py-2.5">
-                                <span className={`text-[9px] px-1.5 py-0.5 rounded uppercase font-semibold border ${
-                                  link.source.includes("extractor") || link.source.includes("gemini")
-                                    ? "bg-indigo-50 text-indigo-700 border-indigo-200 font-bold"
-                                    : "bg-container-high text-on-surface-variant border-outline-variant"
-                                }`}>
-                                  {link.source}
-                                </span>
-                              </td>
-                            </tr>
-                          ))}
-                        </tbody>
-                      </table>
                     </div>
                   )}
                 </div>

@@ -62,6 +62,7 @@ interface ActiveDownload {
   fileStream: fs.WriteStream | null;
   speedCalcBytes: number;
   speedCalcStart: number;
+  throttleBytes?: number;
   speedLimitQuotaTimer?: NodeJS.Timeout;
   mockSimTimer?: NodeJS.Timeout;
   retryAttempt: number;
@@ -214,11 +215,11 @@ function throttleChunk(
   const chunkQuotaBytes = Math.ceil((settings.globalSpeedLimit * 1024) / downloadingCount); // bytes per second per task
 
   // Calculate if the bytes downloaded in the current interval exceed the speed allowance
-  active.speedCalcBytes += chunkLength;
+  active.throttleBytes = (active.throttleBytes || 0) + chunkLength;
   
-  if (active.speedCalcBytes > chunkQuotaBytes) {
+  if (active.throttleBytes > chunkQuotaBytes) {
     pauseStream();
-    const delayTime = Math.ceil(((active.speedCalcBytes - chunkQuotaBytes) / chunkQuotaBytes) * 1000);
+    const delayTime = Math.ceil(((active.throttleBytes - chunkQuotaBytes) / chunkQuotaBytes) * 1000);
     
     // Clear old throttles and delay completion
     if (active.speedLimitQuotaTimer) {
@@ -227,8 +228,7 @@ function throttleChunk(
     
     active.speedLimitQuotaTimer = setTimeout(() => {
       // Smooth reset state on resume boundary
-      active.speedCalcBytes = 0;
-      active.speedCalcStart = Date.now();
+      active.throttleBytes = 0;
       resumeStream();
     }, Math.min(delayTime, 300)); // cap throttle delays to prevent lockup
   }
@@ -249,6 +249,7 @@ function startDownloadTask(task: DownloadTask) {
     fileStream: null,
     speedCalcBytes: 0,
     speedCalcStart: Date.now(),
+    throttleBytes: 0,
     retryAttempt: 0,
   };
   activeDownloads.set(task.id, active);
@@ -540,6 +541,8 @@ function startRealDownload(task: DownloadTask, active: ActiveDownload) {
         res.on("data", (chunk: Buffer) => {
           if (task.status !== "downloading") return;
 
+          active.speedCalcBytes += chunk.length;
+
           // Check write and pause if buffer backpressure exceeds threshold
           const canWrite = active.fileStream?.write(chunk);
           if (canWrite === false) {
@@ -605,6 +608,10 @@ function startRealDownload(task: DownloadTask, active: ActiveDownload) {
     active.fileStream?.end();
     active.fileStream = null;
     activeDownloads.delete(task.id);
+
+    if (task.status === "paused" || task.status === "completed") {
+      return;
+    }
 
     // Save final state of debug info to DB
     const lastTrace = redirectTrace[redirectTrace.length - 1];
