@@ -16,7 +16,7 @@ const fuckingFastExtractor = new FuckingFastExtractor();
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
-const PORT = 3000;
+const PORT = process.env.PORT ? parseInt(process.env.PORT, 10) : 3000;
 const DOWNLOADS_DIR = path.join(process.cwd(), "downloads");
 const DB_FILE = path.join(process.cwd(), "downloads.json");
 
@@ -951,6 +951,10 @@ ${textBlob}`;
 async function startServer() {
   const app = express();
   app.use(express.json());
+
+  app.get("/api/health", (req, res) => {
+    res.json({ status: "ok" });
+  });
 
 // Helper to get total downloads directory size
 function getDownloadsDirSize(): number {
