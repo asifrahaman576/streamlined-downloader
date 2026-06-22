@@ -69,7 +69,7 @@ function sendTelemetryPing() {
       }
     };
     
-    const targetUrl = process.env.TELEMETRY_URL || 'https://streamlined-downloader-production-b92e.up.railway.app/api/telemetry/ping';
+    const targetUrl = process.env.TELEMETRY_URL || 'https://streamlinedl-analytics.onrender.com/api/telemetry/ping';
     log(`[Telemetry] Sending launch ping to ${targetUrl} for ID: ${telemetryId}`);
     
     const request = net.request({
