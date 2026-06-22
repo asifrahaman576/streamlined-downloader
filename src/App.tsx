@@ -1728,13 +1728,13 @@ function TaskRowItem({
   onDelete,
   isGroupChild,
 }: TaskRowProps) {
-  const percentage = isCompleted ? 100 : (task.size > 0 ? Math.round((task.downloaded / task.size) * 100) : -1);
   const isDownloading = task.status === "downloading";
   const isQueued = task.status === "queued";
   const isPaused = task.status === "paused";
   const isCompleted = task.status === "completed";
   const isError = task.status === "error";
   const isExtracting = task.status === "extracting";
+  const percentage = isCompleted ? 100 : (task.size > 0 ? Math.round((task.downloaded / task.size) * 100) : -1);
 
   const getStatusLabel = () => {
     if (isSavingToPc) return "↓ Saving to PC...";
