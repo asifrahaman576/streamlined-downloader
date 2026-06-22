@@ -1,0 +1,492 @@
+<!DOCTYPE html>
+<html class="light" lang="en">
+<head>
+  <meta charset="utf-8"/>
+  <meta content="width=device-width, initial-scale=1.0" name="viewport"/>
+  <title>StreamlineDL Analytics | Server Dashboard</title>
+  <script src="https://cdn.tailwindcss.com?plugins=forms,container-queries"></script>
+  <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@400;600;700&family=Inter:wght@400;500;600&family=Geist&family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&display=swap" rel="stylesheet"/>
+  <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+  <script id="tailwind-config">
+    tailwind.config = {
+      darkMode: "class",
+      theme: {
+        extend: {
+          "colors": {
+            "primary": "#10B981",
+            "on-primary": "#ffffff",
+            "background": "#F9FAFB",
+            "surface": "#ffffff",
+            "surface-container": "#f3f4f6",
+            "on-surface": "#111827",
+            "on-surface-variant": "#64748b",
+            "outline": "rgba(0, 0, 0, 0.08)",
+            "secondary": "#10B981",
+            "error": "#ef4444",
+            "tertiary": "#6366f1"
+          },
+          "borderRadius": {
+            "DEFAULT": "0.25rem",
+            "lg": "0.5rem",
+            "xl": "0.75rem",
+            "2xl": "1rem",
+            "full": "9999px"
+          },
+          "spacing": {
+            "md": "16px",
+            "xl": "48px",
+            "container-max": "1440px",
+            "xs": "4px",
+            "gutter": "20px",
+            "sm": "8px",
+            "base": "4px",
+            "lg": "24px"
+          },
+          "fontFamily": {
+            "display-lg": ["Outfit"],
+            "mono-data": ["Geist"],
+            "body-sm": ["Inter"],
+            "body-lg": ["Inter"],
+            "headline-md": ["Outfit"],
+            "display-lg-mobile": ["Outfit"],
+            "label-caps": ["Inter"]
+          },
+          "fontSize": {
+            "display-lg": ["48px", {"lineHeight": "56px", "letterSpacing": "-0.02em", "fontWeight": "700"}],
+            "mono-data": ["13px", {"lineHeight": "18px", "fontWeight": "400"}],
+            "body-sm": ["14px", {"lineHeight": "20px", "fontWeight": "400"}],
+            "body-lg": ["16px", {"lineHeight": "24px", "fontWeight": "400"}],
+            "headline-md": ["24px", {"lineHeight": "32px", "fontWeight": "600"}],
+            "display-lg-mobile": ["32px", {"lineHeight": "40px", "letterSpacing": "-0.02em", "fontWeight": "700"}],
+            "label-caps": ["12px", {"lineHeight": "16px", "letterSpacing": "0.05em", "fontWeight": "600"}]
+          }
+        },
+      },
+    }
+  </script>
+  <style>
+    body {
+      background-color: #F9FAFB;
+      color: #111827;
+      font-family: 'Inter', sans-serif;
+    }
+    .ui-card {
+      background: #ffffff;
+      border: 1px solid rgba(0, 0, 0, 0.08);
+      box-shadow: 0 1px 3px 0 rgba(0, 0, 0, 0.05);
+      transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+    }
+    .ui-card:hover {
+      border-color: rgba(16, 185, 129, 0.2);
+      box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.05), 0 2px 4px -1px rgba(0, 0, 0, 0.03);
+      transform: translateY(-1px);
+    }
+    .pulse-emerald {
+      box-shadow: 0 0 0 0 rgba(16, 185, 129, 0.7);
+      animation: pulse-emerald 2s infinite;
+    }
+    @keyframes pulse-emerald {
+      0% { transform: scale(0.95); box-shadow: 0 0 0 0 rgba(16, 185, 129, 0.7); }
+      70% { transform: scale(1); box-shadow: 0 0 0 10px rgba(16, 185, 129, 0); }
+      100% { transform: scale(0.95); box-shadow: 0 0 0 0 rgba(16, 185, 129, 0); }
+    }
+    .rotate-click {
+      transition: transform 0.5s ease-in-out;
+    }
+    .rotate-click:active {
+      transform: rotate(360deg);
+    }
+    ::-webkit-scrollbar { width: 8px; }
+    ::-webkit-scrollbar-track { background: transparent; }
+    ::-webkit-scrollbar-thumb { background: rgba(0, 0, 0, 0.1); border-radius: 10px; }
+    ::-webkit-scrollbar-thumb:hover { background: rgba(0, 0, 0, 0.2); }
+  </style>
+</head>
+<body class="min-h-screen">
+  <!-- Top Navigation Anchor -->
+  <header class="fixed top-0 w-full z-50 bg-white/80 backdrop-blur-md border-b border-gray-200 shadow-sm">
+    <div class="flex justify-between items-center h-16 px-lg max-w-container-max mx-auto">
+      <div class="flex items-center gap-4">
+        <h1 class="font-display-lg-mobile text-display-lg-mobile font-bold text-primary tracking-tight">StreamlineDL</h1>
+        <div class="hidden md:flex items-center gap-2 px-3 py-1 bg-gray-100 rounded-full border border-gray-200">
+          <span class="w-2 h-2 rounded-full bg-primary pulse-emerald"></span>
+          <span class="text-label-caps font-label-caps text-on-surface">Monitoring Live</span>
+        </div>
+      </div>
+      <nav class="hidden md:flex items-center gap-8">
+        <a class="text-primary font-bold border-b-2 border-primary pb-1 font-label-caps text-label-caps" href="#">Dashboard</a>
+        <a class="text-on-surface-variant font-medium hover:text-primary transition-all font-label-caps text-label-caps" href="#">Real-time</a>
+        <a class="text-on-surface-variant font-medium hover:text-primary transition-all font-label-caps text-label-caps" href="#">Reports</a>
+        <a class="text-on-surface-variant font-medium hover:text-primary transition-all font-label-caps text-label-caps" href="#">Automation</a>
+      </nav>
+      <div class="flex items-center gap-4">
+        <button class="material-symbols-outlined text-on-surface-variant hover:text-primary transition-colors">notifications</button>
+        <button class="material-symbols-outlined text-on-surface-variant hover:text-primary transition-colors">settings</button>
+        <div class="w-8 h-8 rounded-full overflow-hidden border border-gray-200">
+          <img class="w-full h-full object-cover" data-alt="Profile" src="https://lh3.googleusercontent.com/aida-public/AB6AXuA7uAb9P2mF6tprlqP47sl7gxHrSmVQCIu80i-732CE0f_BJ7u5VCfsf21IsluuFA6iXpMDgw7RPY93PvIk8DUsagHP1eV0_6fV1VkJNZOQrekZAZSMfoVB3f7pnKefMHK2wj3sS0cgYyi7-VZXJTwkZqcvAU1tmxT-n938l8TUy0pn3J1w42Cl5uk1tHucs1w7_QP77cRthjMf1vJTq0ZDtqAAhFCJbGzSVObHhy9r5-4Cwi8yy9HCpWkyoyapvod991zVoRCwfQ"/>
+        </div>
+      </div>
+    </div>
+  </header>
+
+  <!-- Side Navigation Anchor (Desktop only) -->
+  <aside class="hidden lg:flex fixed left-0 top-0 h-screen w-[280px] flex-col py-lg bg-white border-r border-gray-200 shadow-sm pt-24">
+    <div class="px-md mb-8">
+      <div class="flex items-center gap-3 p-md ui-card rounded-xl">
+        <div class="w-10 h-10 bg-primary/10 rounded-lg flex items-center justify-center">
+          <span class="material-symbols-outlined text-primary">data_thresholding</span>
+        </div>
+        <div>
+          <p class="font-headline-md text-headline-md text-on-surface leading-tight">Global Ops</p>
+          <p class="text-label-caps font-label-caps text-primary">V3.4.0-Stable</p>
+        </div>
+      </div>
+    </div>
+    <nav class="flex-1 space-y-1 px-md">
+      <a class="bg-primary/10 text-primary border-r-2 border-primary flex items-center p-md gap-4 rounded-r-lg transition-all group" href="#">
+        <span class="material-symbols-outlined">dashboard</span>
+        <span class="font-label-caps text-label-caps">Overview</span>
+      </a>
+      <a class="text-on-surface-variant flex items-center p-md gap-4 hover:bg-gray-50 hover:text-primary transition-all rounded-lg group" href="#">
+        <span class="material-symbols-outlined">analytics</span>
+        <span class="font-label-caps text-label-caps">Analytics</span>
+      </a>
+      <a class="text-on-surface-variant flex items-center p-md gap-4 hover:bg-gray-50 hover:text-primary transition-all rounded-lg group" href="#">
+        <span class="material-symbols-outlined">group</span>
+        <span class="font-label-caps text-label-caps">Users</span>
+      </a>
+      <a class="text-on-surface-variant flex items-center p-md gap-4 hover:bg-gray-50 hover:text-primary transition-all rounded-lg group" href="#">
+        <span class="material-symbols-outlined">memory</span>
+        <span class="font-label-caps text-label-caps">Infrastructure</span>
+      </a>
+      <a class="text-on-surface-variant flex items-center p-md gap-4 hover:bg-gray-50 hover:text-primary transition-all rounded-lg group" href="#">
+        <span class="material-symbols-outlined">list_alt</span>
+        <span class="font-label-caps text-label-caps">Logs</span>
+      </a>
+    </nav>
+    <div class="px-md mt-auto space-y-2">
+      <button class="w-full py-3 bg-primary text-on-primary font-bold rounded-xl flex items-center justify-center gap-2 hover:opacity-90 transition-opacity">
+        <span class="material-symbols-outlined">add_chart</span>
+        New Report
+      </button>
+      <div class="pt-4 border-t border-gray-100">
+        <a class="text-on-surface-variant flex items-center p-md gap-4 hover:text-primary transition-all" href="#">
+          <span class="material-symbols-outlined">help_outline</span>
+          <span class="font-label-caps text-label-caps">Help</span>
+        </a>
+        <a class="text-on-surface-variant flex items-center p-md gap-4 hover:text-error transition-all" href="/admin/logout">
+          <span class="material-symbols-outlined">logout</span>
+          <span class="font-label-caps text-label-caps">Logout</span>
+        </a>
+      </div>
+    </div>
+  </aside>
+
+  <!-- Main Content Canvas -->
+  <main class="lg:ml-[280px] pt-24 px-lg pb-xl max-w-container-max mx-auto">
+    <!-- Overview Grid -->
+    <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-gutter mb-lg">
+      <!-- Metric Card 1 -->
+      <div class="ui-card p-lg rounded-2xl flex flex-col gap-2">
+        <div class="flex justify-between items-center text-on-surface-variant">
+          <span class="font-label-caps text-label-caps uppercase tracking-widest">Total Installs</span>
+          <span class="material-symbols-outlined text-primary opacity-70">download</span>
+        </div>
+        <h3 class="font-display-lg text-on-surface" id="stat-total-installs">0</h3>
+        <div class="flex items-center gap-2 text-primary text-xs">
+          <span class="material-symbols-outlined text-sm">trending_up</span>
+          <span>Active unique devices</span>
+        </div>
+      </div>
+      <!-- Metric Card 2 -->
+      <div class="ui-card p-lg rounded-2xl flex flex-col gap-2">
+        <div class="flex justify-between items-center text-on-surface-variant">
+          <span class="font-label-caps text-label-caps uppercase tracking-widest">Daily Active (DAU)</span>
+          <span class="material-symbols-outlined text-primary opacity-70">person_play</span>
+        </div>
+        <h3 class="font-display-lg text-on-surface" id="stat-dau">0</h3>
+        <div class="flex items-center gap-2 text-primary text-xs">
+          <span class="material-symbols-outlined text-sm">trending_up</span>
+          <span>Last 24 hours</span>
+        </div>
+      </div>
+      <!-- Metric Card 3 -->
+      <div class="ui-card p-lg rounded-2xl flex flex-col gap-2">
+        <div class="flex justify-between items-center text-on-surface-variant">
+          <span class="font-label-caps text-label-caps uppercase tracking-widest">Weekly Active (WAU)</span>
+          <span class="material-symbols-outlined text-primary opacity-70">date_range</span>
+        </div>
+        <h3 class="font-display-lg text-on-surface" id="stat-wau">0</h3>
+        <div class="flex items-center gap-2 text-primary text-xs">
+          <span class="material-symbols-outlined text-sm">trending_up</span>
+          <span>Last 7 days</span>
+        </div>
+      </div>
+      <!-- Metric Card 4 -->
+      <div class="ui-card p-lg rounded-2xl flex flex-col gap-2">
+        <div class="flex justify-between items-center text-on-surface-variant">
+          <span class="font-label-caps text-label-caps uppercase tracking-widest">Monthly Active (MAU)</span>
+          <span class="material-symbols-outlined text-primary opacity-70">calendar_month</span>
+        </div>
+        <h3 class="font-display-lg text-on-surface" id="stat-mau">0</h3>
+        <div class="flex items-center gap-2 text-primary text-xs">
+          <span class="material-symbols-outlined text-sm">trending_up</span>
+          <span>Last 30 days</span>
+        </div>
+      </div>
+    </div>
+
+    <!-- Charts Bento Grid -->
+    <div class="grid grid-cols-12 gap-gutter mb-lg">
+      <!-- Large Trend Chart -->
+      <div class="col-span-12 lg:col-span-8 ui-card p-lg rounded-2xl flex flex-col">
+        <div class="flex justify-between items-center mb-6">
+          <div>
+            <h2 class="font-headline-md text-headline-md text-on-surface">Active User Trend</h2>
+            <p class="text-body-sm text-on-surface-variant">15-day activity fluctuation analysis</p>
+          </div>
+          <div class="flex gap-2">
+            <button class="px-3 py-1 bg-primary/10 text-primary rounded-lg border border-primary/20 text-label-caps font-label-caps">15D</button>
+          </div>
+        </div>
+        <div class="flex-1 min-h-[300px] w-full">
+          <canvas id="trendChart"></canvas>
+        </div>
+      </div>
+      <!-- Side Pie Chart -->
+      <div class="col-span-12 lg:col-span-4 ui-card p-lg rounded-2xl flex flex-col">
+        <h2 class="font-headline-md text-headline-md text-on-surface mb-1">Client Platforms</h2>
+        <p class="text-body-sm text-on-surface-variant mb-6">OS Distribution across fleet</p>
+        <div class="flex-1 flex flex-col justify-center relative">
+          <canvas class="max-h-[250px]" id="platformChart"></canvas>
+        </div>
+        <div class="mt-6 space-y-3">
+          <div class="flex justify-between items-center">
+            <div class="flex items-center gap-2">
+              <span class="w-3 h-3 rounded-full bg-[#10B981]"></span>
+              <span class="text-body-sm text-on-surface">Windows</span>
+            </div>
+            <span class="font-mono-data text-mono-data text-on-surface" id="label-win">0%</span>
+          </div>
+          <div class="flex justify-between items-center">
+            <div class="flex items-center gap-2">
+              <span class="w-3 h-3 rounded-full bg-[#6366f1]"></span>
+              <span class="text-body-sm text-on-surface">MacOS</span>
+            </div>
+            <span class="font-mono-data text-mono-data text-on-surface" id="label-mac">0%</span>
+          </div>
+          <div class="flex justify-between items-center">
+            <div class="flex items-center gap-2">
+              <span class="w-3 h-3 rounded-full bg-[#e2e8f0]"></span>
+              <span class="text-body-sm text-on-surface">Linux</span>
+            </div>
+            <span class="font-mono-data text-mono-data text-on-surface" id="label-lin">0%</span>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Table Section -->
+    <div class="ui-card rounded-2xl overflow-hidden mb-lg">
+      <div class="p-lg border-b border-gray-100 flex justify-between items-center">
+        <div>
+          <h2 class="font-headline-md text-headline-md text-on-surface">Registered User Installs</h2>
+          <p class="text-body-sm text-on-surface-variant">Real-time telemetry stream</p>
+        </div>
+        <div class="flex gap-4">
+          <button class="w-10 h-10 flex items-center justify-center ui-card rounded-full text-primary rotate-click" id="refreshBtn">
+            <span class="material-symbols-outlined">refresh</span>
+          </button>
+        </div>
+      </div>
+      <div class="overflow-x-auto">
+        <table class="w-full text-left">
+          <thead class="bg-gray-50 border-b border-gray-100">
+            <tr>
+              <th class="px-lg py-md font-label-caps text-label-caps text-on-surface-variant">Installation ID</th>
+              <th class="px-lg py-md font-label-caps text-label-caps text-on-surface-variant">Platform</th>
+              <th class="px-lg py-md font-label-caps text-label-caps text-on-surface-variant">Arch</th>
+              <th class="px-lg py-md font-label-caps text-label-caps text-on-surface-variant">Version</th>
+              <th class="px-lg py-md font-label-caps text-label-caps text-on-surface-variant">First Seen</th>
+              <th class="px-lg py-md font-label-caps text-label-caps text-on-surface-variant">Last Ping</th>
+            </tr>
+          </thead>
+          <tbody class="divide-y divide-gray-100" id="telemetry-table">
+            <tr class="animate-pulse">
+              <td class="px-lg py-12 text-center text-on-surface-variant" colspan="6">Loading telemetry data...</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+  </main>
+
+  <!-- Success Feedback Overlay -->
+  <div class="fixed bottom-lg right-lg ui-card p-md rounded-xl border-primary/50 text-primary flex items-center gap-3 translate-y-24 opacity-0 transition-all duration-500 z-[100]" id="toast">
+    <span class="material-symbols-outlined">check_circle</span>
+    <span class="font-label-caps text-label-caps">Telemetry Updated Successfully</span>
+  </div>
+
+  <script>
+    let trendChartInstance = null;
+    let platformChartInstance = null;
+
+    const fetchTelemetry = async () => {
+      try {
+        const res = await fetch('/api/telemetry/stats');
+        return await res.json();
+      } catch (err) {
+        console.error("Error loading telemetry statistics:", err);
+        return null;
+      }
+    };
+
+    const getPlatformDisplay = (platform) => {
+      const p = platform.toLowerCase();
+      if (p.includes('win')) return 'Windows';
+      if (p.includes('darwin') || p.includes('mac')) return 'MacOS';
+      if (p.includes('linux')) return 'Linux';
+      return platform;
+    };
+
+    const updateUI = async () => {
+      const data = await fetchTelemetry();
+      if (!data) return;
+      
+      // Update Overview stats
+      document.getElementById('stat-total-installs').textContent = data.totalInstalls.toLocaleString();
+      document.getElementById('stat-dau').textContent = data.activeUsers.dau.toLocaleString();
+      document.getElementById('stat-wau').textContent = data.activeUsers.wau.toLocaleString();
+      document.getElementById('stat-mau').textContent = data.activeUsers.mau.toLocaleString();
+
+      // Render Table Data
+      const tableBody = document.getElementById('telemetry-table');
+      if (data.devices.length === 0) {
+        tableBody.innerHTML = `<tr><td colspan="6" class="px-lg py-8 text-center text-on-surface-variant">No telemetry logs found.</td></tr>`;
+      } else {
+        tableBody.innerHTML = data.devices.map(item => {
+          const displayPlatform = getPlatformDisplay(item.platform);
+          return `
+            <tr class="hover:bg-gray-50 transition-colors">
+              <td class="px-lg py-4 font-mono-data text-mono-data text-primary font-medium">${item.installationId}</td>
+              <td class="px-lg py-4">
+                <span class="px-2 py-1 rounded-full text-[10px] font-bold uppercase tracking-wider ${
+                  displayPlatform === 'Windows' ? 'bg-primary/10 text-primary border border-primary/20' : 
+                  displayPlatform === 'MacOS' ? 'bg-tertiary/10 text-tertiary border border-tertiary/20' : 
+                  'bg-gray-100 text-on-surface-variant border border-gray-200'
+                }">${displayPlatform}</span>
+              </td>
+              <td class="px-lg py-4 font-mono-data text-mono-data text-on-surface-variant">${item.arch}</td>
+              <td class="px-lg py-4 text-body-sm text-on-surface">v${item.version}</td>
+              <td class="px-lg py-4 text-body-sm text-on-surface-variant">${new Date(item.firstSeen).toLocaleDateString()}</td>
+              <td class="px-lg py-4 text-body-sm font-medium text-on-surface-variant">${new Date(item.lastSeen).toLocaleTimeString()}</td>
+            </tr>
+          `;
+        }).join('');
+      }
+
+      // Calculate Percentages
+      const total = data.totalInstalls || 1;
+      let winCount = 0, macCount = 0, linCount = 0;
+      Object.keys(data.platformCounts).forEach(key => {
+        const count = data.platformCounts[key];
+        const display = getPlatformDisplay(key);
+        if (display === 'Windows') winCount += count;
+        else if (display === 'MacOS') macCount += count;
+        else if (display === 'Linux') linCount += count;
+      });
+
+      document.getElementById('label-win').textContent = Math.round((winCount / total) * 100) + '%';
+      document.getElementById('label-mac').textContent = Math.round((macCount / total) * 100) + '%';
+      document.getElementById('label-lin').textContent = Math.round((linCount / total) * 100) + '%';
+
+      // Render Charts
+      renderCharts(data, winCount, macCount, linCount);
+    };
+
+    const renderCharts = (data, winCount, macCount, linCount) => {
+      const ctxTrend = document.getElementById('trendChart').getContext('2d');
+      const ctxPlatform = document.getElementById('platformChart').getContext('2d');
+
+      if (trendChartInstance) trendChartInstance.destroy();
+      if (platformChartInstance) platformChartInstance.destroy();
+
+      // Trend Chart
+      trendChartInstance = new Chart(ctxTrend, {
+        type: 'line',
+        data: {
+          labels: data.timeline.labels.map(l => {
+            const parts = l.split('-');
+            return `${parts[1]}/${parts[2]}`; // MM/DD format
+          }),
+          datasets: [{
+            label: 'Active Users',
+            data: data.timeline.values,
+            borderColor: '#10B981',
+            borderWidth: 3,
+            pointRadius: 3,
+            pointHoverRadius: 6,
+            tension: 0.4,
+            fill: true,
+            backgroundColor: (context) => {
+              const chart = context.chart;
+              const {ctx, chartArea} = chart;
+              if (!chartArea) return null;
+              const gradient = ctx.createLinearGradient(0, chartArea.top, 0, chartArea.bottom);
+              gradient.addColorStop(0, 'rgba(16, 185, 129, 0.15)');
+              gradient.addColorStop(1, 'rgba(16, 185, 129, 0)');
+              return gradient;
+            }
+          }]
+        },
+        options: {
+          responsive: true,
+          maintainAspectRatio: false,
+          plugins: { legend: { display: false }, tooltip: { mode: 'index', intersect: false } },
+          scales: {
+            x: { grid: { display: false }, ticks: { color: '#64748b', font: { family: 'Inter', size: 10 } } },
+            y: { border: { dash: [4, 4] }, grid: { color: 'rgba(0,0,0,0.05)' }, ticks: { color: '#64748b', font: { family: 'Inter', size: 10 } } }
+          }
+        }
+      });
+
+      // Platform Distribution
+      platformChartInstance = new Chart(ctxPlatform, {
+        type: 'doughnut',
+        data: {
+          labels: ['Windows', 'MacOS', 'Linux'],
+          datasets: [{
+            data: [winCount, macCount, linCount],
+            backgroundColor: ['#10B981', '#6366f1', '#e2e8f0'],
+            borderWidth: 0,
+            hoverOffset: 10
+          }]
+        },
+        options: {
+          cutout: '75%',
+          responsive: true,
+          maintainAspectRatio: false,
+          plugins: { legend: { display: false } }
+        }
+      });
+    };
+
+    // Refresh interaction
+    document.getElementById('refreshBtn').addEventListener('click', async function() {
+      const toast = document.getElementById('toast');
+      await updateUI();
+      
+      // Show toast
+      toast.style.opacity = '1';
+      toast.style.transform = 'translateY(0)';
+      
+      setTimeout(() => {
+        toast.style.opacity = '0';
+        toast.style.transform = 'translateY(24px)';
+      }, 3000);
+    });
+
+    window.addEventListener('load', updateUI);
+  </script>
+</body>
+</html>

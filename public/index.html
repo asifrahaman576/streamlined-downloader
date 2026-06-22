@@ -1,0 +1,237 @@
+<!DOCTYPE html>
+<html class="light" lang="en">
+<head>
+  <meta charset="utf-8"/>
+  <meta content="width=device-width, initial-scale=1.0" name="viewport"/>
+  <title>StreamlineDL | High-Performance File Management</title>
+  <script src="https://cdn.tailwindcss.com?plugins=forms,container-queries"></script>
+  <link href="https://fonts.googleapis.com/css2?family=Hanken+Grotesk:wght@400;600;700&amp;family=JetBrains+Mono:wght@500&amp;display=swap" rel="stylesheet"/>
+  <link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet"/>
+  <script id="tailwind-config">
+    tailwind.config = {
+        darkMode: "class",
+        theme: {
+            extend: {
+                "colors": {
+                    "on-primary-container": "#00412c",
+                    "secondary-container": "#d5e0f8",
+                    "surface-container": "#eceef0",
+                    "background": "#f7f9fb",
+                    "surface-container-highest": "#e0e3e5",
+                    "outline-variant": "#bbcac0",
+                    "on-secondary-container": "#586377",
+                    "primary-container": "#00b884",
+                    "tertiary-fixed-dim": "#b9c8de",
+                    "on-secondary": "#ffffff",
+                    "surface-dim": "#d8dadc",
+                    "on-tertiary-fixed": "#0d1c2d",
+                    "on-error-container": "#93000a",
+                    "surface-bright": "#f7f9fb",
+                    "surface-container-high": "#e6e8ea",
+                    "secondary": "#545f73",
+                    "on-primary": "#ffffff",
+                    "surface-variant": "#e0e3e5",
+                    "on-primary-fixed-variant": "#005138",
+                    "outline": "#6c7a72",
+                    "secondary-fixed": "#d8e3fb",
+                    "error": "#ba1a1a",
+                    "secondary-fixed-dim": "#bcc7de",
+                    "tertiary": "#516072",
+                    "surface": "#f7f9fb",
+                    "primary-fixed-dim": "#4cdea7",
+                    "on-surface-variant": "#3c4a42",
+                    "tertiary-fixed": "#d4e4fa",
+                    "inverse-primary": "#4cdea7",
+                    "inverse-on-surface": "#eff1f3",
+                    "primary-fixed": "#6dfbc2",
+                    "on-tertiary": "#ffffff",
+                    "on-primary-fixed": "#002114",
+                    "on-surface": "#191c1e",
+                    "on-background": "#191c1e",
+                    "on-tertiary-fixed-variant": "#39485a",
+                    "on-error": "#ffffff",
+                    "on-secondary-fixed": "#111c2d",
+                    "surface-tint": "#006c4c",
+                    "surface-container-low": "#f2f4f6",
+                    "on-secondary-fixed-variant": "#3c475a",
+                    "tertiary-container": "#94a3b8",
+                    "on-tertiary-container": "#2b394b",
+                    "inverse-surface": "#2d3133",
+                    "primary": "#006c4c",
+                    "surface-container-lowest": "#ffffff",
+                    "error-container": "#ffdad6"
+                },
+                "borderRadius": {
+                    "DEFAULT": "0.125rem",
+                    "lg": "0.25rem",
+                    "xl": "0.5rem",
+                    "full": "0.75rem"
+                },
+                "spacing": {
+                    "unit": "4px",
+                    "gutter": "16px",
+                    "margin-page": "24px",
+                    "container-padding": "16px",
+                    "row-height": "48px"
+                },
+                "fontFamily": {
+                    "headline-md": ["Hanken Grotesk"],
+                    "status-lg": ["Hanken Grotesk"],
+                    "headline-lg": ["Hanken Grotesk"],
+                    "body-md": ["Hanken Grotesk"],
+                    "label-md": ["JetBrains Mono"]
+                },
+                "fontSize": {
+                    "headline-md": ["18px", {"lineHeight": "24px", "fontWeight": "600"}],
+                    "status-lg": ["20px", {"lineHeight": "28px", "fontWeight": "700"}],
+                    "headline-lg": ["24px", {"lineHeight": "32px", "fontWeight": "700"}],
+                    "body-md": ["14px", {"lineHeight": "20px", "fontWeight": "400"}],
+                    "label-md": ["12px", {"lineHeight": "16px", "letterSpacing": "0.05em", "fontWeight": "500"}]
+                }
+            },
+        },
+    }
+  </script>
+  <style>
+    body {
+        background-color: #f7f9fb;
+        color: #191c1e;
+    }
+    .material-symbols-outlined {
+        font-variation-settings: 'FILL' 0, 'wght' 400, 'GRAD' 0, 'opsz' 24;
+        vertical-align: middle;
+    }
+    .bento-grid {
+        display: grid;
+        grid-template-columns: repeat(12, 1fr);
+        gap: 16px;
+    }
+    .glass-card {
+        background: rgba(255, 255, 255, 0.8);
+        backdrop-filter: blur(8px);
+        border: 1px solid #e2e8e0;
+    }
+    .connector-line {
+        width: 1px;
+        background-color: #CBD5E1;
+        height: 100%;
+    }
+  </style>
+</head>
+<body class="font-body-md text-body-md overflow-x-hidden">
+  <!-- TopNavBar -->
+  <nav class="bg-surface border-b border-outline-variant fixed top-0 w-full z-50">
+    <div class="flex justify-between items-center px-margin-page h-row-height w-full max-w-[1440px] mx-auto">
+      <div class="text-headline-lg font-headline-lg text-primary">StreamlineDL</div>
+    </div>
+  </nav>
+
+  <!-- Hero Section -->
+  <section class="pt-32 pb-20 px-margin-page relative overflow-hidden">
+    <!-- Abstract Decoration -->
+    <div class="absolute -top-24 -right-24 w-96 h-96 bg-primary-container opacity-5 rounded-full blur-3xl"></div>
+    <div class="absolute top-1/2 -left-24 w-64 h-64 bg-secondary-container opacity-10 rounded-full blur-3xl"></div>
+    <div class="max-w-[1440px] mx-auto grid grid-cols-1 lg:grid-cols-2 gap-12 items-center">
+      <div class="space-y-6">
+        <h1 class="text-[56px] leading-[64px] font-headline-lg tracking-tight text-on-surface">
+          Fast, Independent <br/><span class="text-primary">Desktop Downloader</span>
+        </h1>
+        <p class="text-secondary text-status-lg max-w-xl">
+          A lightweight download manager for Windows. Paste links, group files, and download directly to your local folders with maximum connection efficiency.
+        </p>
+        <div class="flex flex-col sm:flex-row gap-4 pt-4">
+          <a href="StreamlineDL_Setup.exe" download class="bg-primary text-on-primary px-8 h-14 rounded-lg font-headline-md flex items-center justify-center gap-2 shadow-lg shadow-primary/10 hover:translate-y-[-2px] transition-all no-underline">
+            <span class="material-symbols-outlined">download</span>
+            Download StreamlineDL for Windows
+          </a>
+          <div class="flex items-center text-secondary text-label-md px-2">
+            64-bit installer (.exe)
+          </div>
+        </div>
+      </div>
+      <!-- Visual Showcase -->
+      <div class="relative">
+        <div class="glass-card rounded-xl overflow-hidden shadow-2xl p-2 border-outline-variant/30">
+          <img alt="StreamlineDL Desktop Interface" class="w-full h-auto rounded-lg shadow-inner" src="https://lh3.googleusercontent.com/aida-public/AB6AXuCyz-19B9tXDQl7yzDPMIBgX3Y_gAQJUu2nkZXhW0-6fzcno1s-Jw02z_sEHCBtlrJ4N6xKul-JGYKdRc5zqitU6BV5kMeS4HPy8V-Wb7frZSfFVgCCEokFh2X9SlWT0Iyq2Y2Pm3cOAynljjCXYnDXdy0jTLL5YEM9q1gB99ghIUp7xKwF69FbJY2LT4dHhWqMXnJrExD05OMV35ImJGhBTFblVOoNzqdriwZ1bN2AoSgallTbTFri1oYImpe5OoZNYZAGKzrUTg"/>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- Setup Guide: Bento Grid Layout -->
+  <section id="guide" class="py-20 bg-surface-container-low px-margin-page">
+    <div class="max-w-[1440px] mx-auto">
+      <div class="text-center mb-16">
+        <h2 class="font-headline-lg text-headline-lg text-on-surface">Start Downloading in Minutes</h2>
+        <p class="text-secondary mt-2">Zero configuration required. Pure performance from the first launch.</p>
+      </div>
+      <div class="grid grid-cols-1 md:grid-cols-3 gap-8">
+        <!-- Step 1 -->
+        <div class="bg-surface-container-lowest p-8 rounded-xl border border-outline-variant/40 hover:border-primary-container transition-colors group">
+          <div class="w-12 h-12 bg-surface-container-high rounded-lg flex items-center justify-center mb-6 text-primary group-hover:bg-primary-container group-hover:text-on-primary-container transition-all">
+            <span class="material-symbols-outlined">install_desktop</span>
+          </div>
+          <div class="font-label-md text-primary mb-2">STEP 01</div>
+          <h3 class="font-headline-md text-headline-md mb-3">Install &amp; Launch</h3>
+          <p class="text-secondary">Run the 64-bit installer and open StreamlineDL. It’s lightweight and optimized for Windows 10/11.</p>
+        </div>
+        <!-- Step 2 -->
+        <div class="bg-surface-container-lowest p-8 rounded-xl border border-outline-variant/40 hover:border-primary-container transition-colors group">
+          <div class="w-12 h-12 bg-surface-container-high rounded-lg flex items-center justify-center mb-6 text-primary group-hover:bg-primary-container group-hover:text-on-primary-container transition-all">
+            <span class="material-symbols-outlined">content_paste</span>
+          </div>
+          <div class="font-label-md text-primary mb-2">STEP 02</div>
+          <h3 class="font-headline-md text-headline-md mb-3">Paste Your Links</h3>
+          <p class="text-secondary">Copy URLs from any browser. Our engine automatically detects file types and prepares the queue.</p>
+        </div>
+        <!-- Step 3 -->
+        <div class="bg-surface-container-lowest p-8 rounded-xl border border-outline-variant/40 hover:border-primary-container transition-colors group">
+          <div class="w-12 h-12 bg-surface-container-high rounded-lg flex items-center justify-center mb-6 text-primary group-hover:bg-primary-container group-hover:text-on-primary-container transition-all">
+            <span class="material-symbols-outlined">speed</span>
+          </div>
+          <div class="font-label-md text-primary mb-2">STEP 03</div>
+          <h3 class="font-headline-md text-headline-md mb-3">Accelerate</h3>
+          <p class="text-secondary">Enable multi-threaded downloading to saturate your connection and finish tasks up to 5x faster.</p>
+        </div>
+      </div>
+    </div>
+  </section>
+
+
+
+  <!-- Footer -->
+  <footer class="bg-surface-container-lowest border-t border-outline-variant">
+    <div class="flex flex-col md:flex-row justify-between items-center px-margin-page py-gutter w-full max-w-[1440px] mx-auto gap-gutter">
+      <div class="flex flex-col md:flex-row items-center gap-gutter">
+        <div class="text-headline-md font-headline-md text-primary">StreamlineDL</div>
+        <p class="text-secondary dark:text-surface-variant font-body-md text-body-md">
+          © 2024 StreamlineDL. High-performance file management.
+        </p>
+      </div>
+      <div class="flex gap-6">
+        <a class="text-on-secondary-container hover:underline decoration-primary transition-all duration-200" href="#">Privacy Policy</a>
+        <a class="text-on-secondary-container hover:underline decoration-primary transition-all duration-200" href="#">Terms of Service</a>
+        <a class="text-on-secondary-container hover:underline decoration-primary transition-all duration-200" href="#">Documentation</a>
+        <a class="text-on-secondary-container hover:underline decoration-primary transition-all duration-200" href="#">Support</a>
+      </div>
+    </div>
+  </footer>
+
+  <script>
+    // Simple micro-interaction for download buttons
+    const ctas = document.querySelectorAll('a[download]');
+    ctas.forEach(cta => {
+      cta.addEventListener('mousedown', () => {
+          cta.style.transform = 'scale(0.98)';
+          cta.style.opacity = '0.9';
+      });
+      const resetCta = () => {
+          cta.style.transform = 'scale(1)';
+          cta.style.opacity = '1';
+      };
+      cta.addEventListener('mouseup', resetCta);
+      cta.addEventListener('mouseleave', resetCta);
+    });
+  </script>
+</body>
+</html>
