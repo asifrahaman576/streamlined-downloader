@@ -21,57 +21,11 @@ app.use(express.urlencoded({ extended: true }));
 // Express static on public will serve index.html on / automatically, which is exactly what we want for the public download page!
 app.use(express.static(pathModule.join(__dirname, 'public')));
 
-// Ensure telemetry file exists with base structure
 function initDatabase() {
   if (!fs.existsSync(DATA_FILE)) {
-    const mockData = generateMockData();
-    fs.writeFileSync(DATA_FILE, JSON.stringify(mockData, null, 2), 'utf8');
+    const emptyData = { devices: {}, pings: [] };
+    fs.writeFileSync(DATA_FILE, JSON.stringify(emptyData, null, 2), 'utf8');
   }
-}
-
-function generateMockData() {
-  const now = new Date();
-  const devices = {};
-  const pings = [];
-  const platforms = ['win32', 'darwin', 'linux'];
-  const versions = ['1.0.0', '1.0.1', '1.1.0'];
-
-  for (let i = 1; i <= 25; i++) {
-    const id = `user_mock_${Math.random().toString(36).substr(2, 9)}`;
-    const platform = platforms[Math.floor(Math.random() * platforms.length)];
-    const version = versions[Math.floor(Math.random() * versions.length)];
-    const arch = 'x64';
-    const osVersion = platform === 'win32' ? '10.0.22621' : (platform === 'darwin' ? '23.4.0' : '6.5.0');
-    
-    const daysAgo = Math.floor(Math.random() * 30);
-    const installDate = new Date(now.getTime() - daysAgo * 24 * 60 * 60 * 1000);
-    
-    const activeDaysAgo = Math.floor(Math.random() * daysAgo);
-    const activeDate = new Date(now.getTime() - activeDaysAgo * 24 * 60 * 60 * 1000);
-
-    devices[id] = {
-      installationId: id,
-      firstSeen: installDate.toISOString(),
-      lastSeen: activeDate.toISOString(),
-      platform,
-      arch,
-      version,
-      osVersion
-    };
-
-    let pingDate = new Date(installDate);
-    while (pingDate <= activeDate) {
-      pings.push({
-        installationId: id,
-        timestamp: pingDate.toISOString(),
-        platform,
-        version
-      });
-      pingDate = new Date(pingDate.getTime() + (1 + Math.floor(Math.random() * 4)) * 24 * 60 * 60 * 1000);
-    }
-  }
-
-  return { devices, pings };
 }
 
 function readData() {
