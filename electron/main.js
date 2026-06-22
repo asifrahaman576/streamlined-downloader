@@ -129,6 +129,7 @@ async function createWindow() {
     width: 1280,
     height: 800,
     show: false, // Start hidden, show only when fully loaded (prevents blank screen)
+    backgroundColor: '#020617',
     title: 'StreamlineDL - Desktop Downloader',
     webPreferences: {
       preload: path.join(__dirname, 'preload.js'),
