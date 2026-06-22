@@ -1,4 +1,5 @@
 import { app, BrowserWindow, ipcMain, dialog, Menu, MenuItem, net } from 'electron';
+import { autoUpdater } from 'electron-updater';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import { fork } from 'child_process';
@@ -212,6 +213,7 @@ ipcMain.handle('select-directory', async () => {
 app.whenReady().then(() => {
   setupLogging();
   sendTelemetryPing();
+  autoUpdater.checkForUpdatesAndNotify();
   startLocalServer();
   createWindow();
 
