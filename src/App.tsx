@@ -70,14 +70,53 @@ export default function App() {
 
   // Simulated Network load state
   const [networkLoad, setNetworkLoad] = useState<number[]>([10, 15, 12, 14, 11, 15, 13, 12, 10, 14]);
+  const [nameColumnWidth, setNameColumnWidth] = useState<number>(280);
+  const [isResizing, setIsResizing] = useState(false);
+
+  const startResizingNameColumn = (mouseDownEvent: React.MouseEvent) => {
+    mouseDownEvent.preventDefault();
+    setIsResizing(true);
+    
+    const startWidth = nameColumnWidth;
+    const startX = mouseDownEvent.clientX;
+
+    const doDrag = (mouseMoveEvent: MouseEvent) => {
+      const deltaX = mouseMoveEvent.clientX - startX;
+      const newWidth = Math.max(150, Math.min(800, startWidth + deltaX));
+      setNameColumnWidth(newWidth);
+    };
+
+    const stopDrag = () => {
+      setIsResizing(false);
+      document.removeEventListener("mousemove", doDrag);
+      document.removeEventListener("mouseup", stopDrag);
+    };
+
+    document.addEventListener("mousemove", doDrag);
+    document.addEventListener("mouseup", stopDrag);
+  };
 
   // ─── Save-to-folder state (File System Access API) ───
   // When set, completed downloads are silently written here — no Chrome bar.
   const [downloadDirHandle, setDownloadDirHandle] = useState<FileSystemDirectoryHandle | null>(null);
   const [savingToPcSet, setSavingToPcSet] = useState<Set<string>>(new Set());
   const hasFsApi = typeof window !== "undefined" && "showDirectoryPicker" in window;
+  const isElectron = typeof window !== "undefined" && !!(window as any).electron?.isElectron;
 
-  // Let user pick a save folder
+  // Let user pick a save folder natively in Electron
+  const handlePickSaveFolderElectron = async () => {
+    try {
+      const chosenPath = await (window as any).electron.selectDirectory();
+      if (chosenPath) {
+        saveEngineSettings({ downloadDirectory: chosenPath });
+        showStatus(`✓ Save folder set to: "${chosenPath}"`, "success");
+      }
+    } catch (err: any) {
+      showStatus("Failed to pick directory: " + err.message, "error");
+    }
+  };
+
+  // Let user pick a save folder in browser fallback mode
   const handlePickSaveFolder = async () => {
     try {
       const dir = await (window as any).showDirectoryPicker({ mode: "readwrite" });
@@ -99,6 +138,7 @@ export default function App() {
   useEffect(() => { downloadDirHandleRef.current = downloadDirHandle; }, [downloadDirHandle]);
 
   useEffect(() => {
+    if (isElectron) return; // In Electron, the server writes directly to the destination folder!
     downloads.forEach((task) => {
       if (task.status === "completed" && !autoDownloadedRefs.current.has(task.id)) {
         autoDownloadedRefs.current.add(task.id);
@@ -748,6 +788,7 @@ export default function App() {
                   </button>
                 </div>
               </div>
+
               <div className="flex items-center gap-6">
                 <div className="flex flex-col items-end">
                   <span className="text-label-mono-xs text-on-surface-variant uppercase">Global Speed</span>
@@ -797,21 +838,31 @@ export default function App() {
                 <div className="bg-surface border border-outline-variant rounded-xl overflow-hidden shadow-sm">
                   {/* Save folder row */}
                   <div className={`flex items-center gap-3 px-5 py-3 border-b ${
-                    downloadDirHandle
+                    isElectron || downloadDirHandle
                       ? "bg-accent/5 border-accent/20"
                       : "bg-amber-50 border-amber-200"
                   }`}>
-                    <span className={`material-symbols-outlined text-[18px] ${downloadDirHandle ? "text-accent" : "text-amber-600"}`}>
-                      {downloadDirHandle ? "folder_check" : "folder_open"}
+                    <span className={`material-symbols-outlined text-[18px] ${isElectron || downloadDirHandle ? "text-accent" : "text-amber-600"}`}>
+                      {isElectron || downloadDirHandle ? "folder_check" : "folder_open"}
                     </span>
-                    <span className={`text-[11px] flex-1 ${downloadDirHandle ? "text-accent font-semibold" : "text-amber-700"}`}>
-                      {downloadDirHandle
+                    <span className={`text-[11px] flex-1 ${isElectron || downloadDirHandle ? "text-accent font-semibold" : "text-amber-700"}`}>
+                      {isElectron
+                        ? `Save folder: "${settings.downloadDirectory || 'Downloads'}" — active files download directly here`
+                        : downloadDirHandle
                         ? `Save folder: "${downloadDirHandle.name}" — files go directly here when done`
                         : hasFsApi
-                          ? "Set a save folder so files download directly to your PC (no Chrome bar)"
-                          : "Use Chrome or Edge for direct-to-PC downloads"}
+                        ? "Set a save folder so files download directly to your PC (no Chrome bar)"
+                        : "Use Chrome or Edge for direct-to-PC downloads"}
                     </span>
-                    {hasFsApi && (
+                    {isElectron ? (
+                      <button
+                        onClick={handlePickSaveFolderElectron}
+                        className="bg-accent/10 border border-accent/30 text-accent hover:bg-accent/20 text-[11px] font-bold px-3 py-1.5 rounded-lg transition-all cursor-pointer flex items-center gap-1.5"
+                      >
+                        <span className="material-symbols-outlined text-[14px]">folder_open</span>
+                        Change Folder
+                      </button>
+                    ) : hasFsApi ? (
                       <button
                         onClick={handlePickSaveFolder}
                         className={`text-[11px] font-bold px-3 py-1.5 rounded-lg border transition-all cursor-pointer flex items-center gap-1.5 ${
@@ -823,7 +874,7 @@ export default function App() {
                         <span className="material-symbols-outlined text-[14px]">create_new_folder</span>
                         {downloadDirHandle ? "Change Folder" : "Set Save Folder"}
                       </button>
-                    )}
+                    ) : null}
                   </div>
 
                   <div className="p-5">
@@ -883,7 +934,30 @@ export default function App() {
                       </p>
                     </div>
                   ) : (
-                    <div className="divide-y divide-outline-variant/30">
+                    <div className="divide-y divide-outline-variant/30 bg-surface">
+                      {/* Table Header Row with Resizer */}
+                      <div className="flex items-center px-4 h-10 border-b border-outline-variant bg-container-high/30 text-[10px] font-bold text-on-surface-variant uppercase select-none tracking-wider">
+                        <div className="w-8 flex-shrink-0 flex justify-center">
+                          <span className="material-symbols-outlined text-[16px] text-outline">info</span>
+                        </div>
+                        <div 
+                          style={{ width: `${nameColumnWidth}px` }} 
+                          className="flex-shrink-0 px-3 min-w-0 relative flex items-center h-full border-r border-outline-variant/10 group/header"
+                        >
+                          <span className="truncate">Name</span>
+                          {/* Draggable Divider */}
+                          <div 
+                            onMouseDown={startResizingNameColumn}
+                            className="absolute right-0 top-0 bottom-0 w-2 cursor-col-resize hover:bg-accent/40 active:bg-accent/80 transition-colors z-20"
+                            title="Drag to resize Name column"
+                          />
+                        </div>
+                        <div className="w-[300px] px-4 flex-shrink-0 hidden md:block">Progress</div>
+                        <div className="w-[180px] text-right flex-shrink-0 hidden sm:block pr-2">Status / Speed</div>
+                        <div className="w-[100px] text-right flex-shrink-0 hidden sm:block">Size</div>
+                        <div className="flex-1 ml-4 text-right flex-shrink-0 pr-4">Actions</div>
+                      </div>
+
                       {/* Render grouped packages first */}
                       {groupedDownloads.groups.map((group) => (
                         <PackageGroupRow
@@ -891,6 +965,7 @@ export default function App() {
                           packageName={group.packageName}
                           tasks={group.tasks}
                           expandedTaskId={expandedTaskId}
+                          nameColumnWidth={nameColumnWidth}
                           onToggleExpand={(id) => setExpandedTaskId(expandedTaskId === id ? null : id)}
                           onStart={(id) => handleTaskAction(id, "start")}
                           onPause={(id) => handleTaskAction(id, "pause")}
@@ -905,6 +980,7 @@ export default function App() {
                            task={task}
                            expanded={expandedTaskId === task.id}
                            isSavingToPc={savingToPcSet.has(task.id)}
+                           nameColumnWidth={nameColumnWidth}
                            onToggleExpand={() => setExpandedTaskId(expandedTaskId === task.id ? null : task.id)}
                            onStart={() => handleTaskAction(task.id, "start")}
                            onPause={() => handleTaskAction(task.id, "pause")}
@@ -1118,12 +1194,23 @@ export default function App() {
                   <div className="space-y-2 md:col-span-2">
                     <label className="block text-xs font-bold text-on-surface uppercase tracking-wider">Active Storage Downloads Directory</label>
                     <p className="text-[11px] text-on-surface-variant">The local storage directory on the server where completed downloads are saved.</p>
-                    <input 
-                      type="text" 
-                      disabled 
-                      value={settings.downloadDirectory} 
-                      className="w-full text-xs bg-container-low border border-outline-variant rounded-lg p-2.5 font-mono text-outline select-all"
-                    />
+                    <div className="flex gap-2">
+                      <input 
+                        type="text" 
+                        disabled 
+                        value={settings.downloadDirectory} 
+                        className="flex-1 text-xs bg-container-low border border-outline-variant rounded-lg p-2.5 font-mono text-outline select-all"
+                      />
+                      {isElectron ? (
+                        <button
+                          onClick={handlePickSaveFolderElectron}
+                          className="bg-container-high hover:bg-container-highest border border-outline-variant text-on-surface text-xs font-bold px-4 py-2.5 rounded-lg cursor-pointer flex items-center gap-1.5"
+                        >
+                          <span className="material-symbols-outlined text-[16px]">folder_open</span>
+                          Browse
+                        </button>
+                      ) : null}
+                    </div>
                   </div>
 
                   <div className="space-y-2 md:col-span-2 bg-container-low p-4 border border-outline-variant rounded-lg">
@@ -1484,6 +1571,7 @@ interface PackageGroupRowProps {
   packageName: string;
   tasks: DownloadTask[];
   expandedTaskId: string | null;
+  nameColumnWidth: number;
   onToggleExpand: (id: string) => void;
   onStart: (id: string) => void;
   onPause: (id: string) => void;
@@ -1491,7 +1579,7 @@ interface PackageGroupRowProps {
   onDelete: (id: string) => void;
 }
 
-function PackageGroupRow({ packageName, tasks, expandedTaskId, onToggleExpand, onStart, onPause, onRetry, onDelete }: PackageGroupRowProps) {
+function PackageGroupRow({ packageName, tasks, expandedTaskId, nameColumnWidth, onToggleExpand, onStart, onPause, onRetry, onDelete }: PackageGroupRowProps) {
   const [groupExpanded, setGroupExpanded] = React.useState(false);
 
   const totalSize = tasks.reduce((s, t) => s + (t.size > 0 ? t.size : 0), 0);
@@ -1500,7 +1588,7 @@ function PackageGroupRow({ packageName, tasks, expandedTaskId, onToggleExpand, o
   const allCompleted = tasks.every(t => t.status === "completed");
   const anyDownloading = tasks.some(t => t.status === "downloading" || t.status === "extracting");
   const anyError = tasks.some(t => t.status === "error");
-  const percentage = totalSize > 0 ? Math.round((totalDownloaded / totalSize) * 100) : 0;
+  const percentage = allCompleted ? 100 : (totalSize > 0 ? Math.round((totalDownloaded / totalSize) * 100) : 0);
 
   const groupStatus = allCompleted ? "completed" : anyError ? "error" : anyDownloading ? "downloading" : "queued";
 
@@ -1513,7 +1601,10 @@ function PackageGroupRow({ packageName, tasks, expandedTaskId, onToggleExpand, o
             {allCompleted ? "inventory_2" : "folder_zip"}
           </span>
         </div>
-        <div className="flex-1 px-4 min-w-0">
+        <div 
+          style={{ width: `${nameColumnWidth}px` }} 
+          className="flex-shrink-0 px-4 min-w-0"
+        >
           <button
             onClick={() => setGroupExpanded(!groupExpanded)}
             className="text-left w-full focus:outline-none cursor-pointer flex items-center gap-2 group/btn"
@@ -1596,6 +1687,7 @@ function PackageGroupRow({ packageName, tasks, expandedTaskId, onToggleExpand, o
               key={task.id}
               task={task}
               expanded={expandedTaskId === task.id}
+              nameColumnWidth={nameColumnWidth}
               onToggleExpand={() => onToggleExpand(task.id)}
               onStart={() => onStart(task.id)}
               onPause={() => onPause(task.id)}
@@ -1615,6 +1707,7 @@ interface TaskRowProps {
   task: DownloadTask;
   expanded: boolean;
   isSavingToPc?: boolean;
+  nameColumnWidth: number;
   onToggleExpand: () => void;
   onStart: () => void;
   onPause: () => void;
@@ -1627,6 +1720,7 @@ function TaskRowItem({
   task,
   expanded,
   isSavingToPc = false,
+  nameColumnWidth,
   onToggleExpand,
   onStart,
   onPause,
@@ -1634,7 +1728,7 @@ function TaskRowItem({
   onDelete,
   isGroupChild,
 }: TaskRowProps) {
-  const percentage = task.size > 0 ? Math.round((task.downloaded / task.size) * 100) : -1;
+  const percentage = isCompleted ? 100 : (task.size > 0 ? Math.round((task.downloaded / task.size) * 100) : -1);
   const isDownloading = task.status === "downloading";
   const isQueued = task.status === "queued";
   const isPaused = task.status === "paused";
@@ -1681,8 +1775,10 @@ function TaskRowItem({
           </span>
         </div>
 
-        {/* Filename — takes up remaining space, shows full name as tooltip */}
-        <div className="flex-1 px-3 min-w-0 overflow-hidden">
+        <div 
+          style={{ width: `${nameColumnWidth}px` }} 
+          className="flex-shrink-0 px-3 min-w-0"
+        >
           <button 
             onClick={onToggleExpand}
             className="text-left w-full focus:outline-none cursor-pointer group/name"
@@ -1692,7 +1788,7 @@ function TaskRowItem({
               {task.filename}
             </span>
             {task.downloaded > 0 && !isCompleted && (
-              <span className="text-[9px] text-outline font-mono">
+              <span className="text-[9px] text-outline font-mono block truncate">
                 {formatBytes(task.downloaded)}{task.size > 0 ? ` / ${formatBytes(task.size)}` : " downloaded"}
               </span>
             )}

@@ -6,6 +6,7 @@
     "node": ">=20.0.0"
   },
   "type": "module",
+  "main": "electron/main.js",
   "scripts": {
     "dev": "tsx server.ts",
     "build": "vite build && esbuild server.ts --bundle --platform=node --format=esm --packages=external --sourcemap --outfile=dist/server.js",
@@ -13,7 +14,9 @@
     "clean": "rm -rf dist server.js downloads",
     "lint": "tsc --noEmit",
     "test": "tsx src/test-suite.ts",
-    "pipeline": "tsx src/pipeline-checker.ts"
+    "pipeline": "tsx src/pipeline-checker.ts",
+    "electron:dev": "concurrently \"npm run dev\" \"wait-on http://localhost:3000 && electron .\"",
+    "electron:build": "npm run build && electron-builder"
   },
   "dependencies": {
     "@google/genai": "^2.4.0",
@@ -33,12 +36,34 @@
     "@types/react": "^19.2.17",
     "@types/react-dom": "^19.2.3",
     "autoprefixer": "^10.4.21",
+    "concurrently": "^10.0.3",
+    "electron": "^42.4.1",
+    "electron-builder": "^26.15.3",
     "esbuild": "^0.25.0",
     "eslint": "^10.5.0",
     "prettier": "^3.8.4",
     "tailwindcss": "^4.1.14",
     "tsx": "^4.21.0",
     "typescript": "~5.8.2",
-    "vite": "^6.2.3"
+    "vite": "^6.2.3",
+    "wait-on": "^9.0.10"
+  },
+  "build": {
+    "appId": "com.streamlinedl.app",
+    "productName": "StreamlineDL",
+    "asar": false,
+    "directories": {
+      "output": "dist-electron"
+    },
+    "files": [
+      "dist/**/*",
+      "electron/**/*",
+      "package.json"
+    ],
+    "win": {
+      "target": [
+        "nsis"
+      ]
+    }
   }
 }

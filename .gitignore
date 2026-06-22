@@ -6,7 +6,11 @@ node_modules/
 # Production / Build
 dist/
 dist-ssr/
+dist-electron/
+release/
+*.exe
 *.local
+
 
 # Downloads & Temp DB Files
 downloads/

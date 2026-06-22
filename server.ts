@@ -4,7 +4,6 @@ import fs from "fs";
 import http from "http";
 import https from "https";
 import { fileURLToPath } from "url";
-import { createServer as createViteServer } from "vite";
 import { GoogleGenAI, Type } from "@google/genai";
 import { DownloadTask, GrabbedLink, EngineSettings } from "./src/types.js";
 import { runPipelineAnalysis } from "./src/pipeline-checker.js";
@@ -45,6 +44,17 @@ function getGemini(): GoogleGenAI | null {
   return aiClient;
 }
 
+const DEFAULT_DOWNLOADS_DIR = (() => {
+  const home = process.env.USERPROFILE || process.env.HOME;
+  if (home) {
+    const winDownloads = path.join(home, "Downloads");
+    if (fs.existsSync(winDownloads)) {
+      return winDownloads;
+    }
+  }
+  return path.join(process.cwd(), "downloads");
+})();
+
 // In-Memory Storage & Database
 let downloadsDb: DownloadTask[] = [];
 let grabbedLinksInbox: GrabbedLink[] = [];
@@ -52,7 +62,7 @@ let settings: EngineSettings = {
   maxSimultaneous: 2,
   globalSpeedLimit: 0, // unlimited (in KB/s)
   autoRetryCount: 3,
-  downloadDirectory: DOWNLOADS_DIR,
+  downloadDirectory: DEFAULT_DOWNLOADS_DIR,
   duplicateAction: "rename",
 };
 
@@ -72,9 +82,45 @@ const activeDownloads = new Map<string, ActiveDownload>();
 
 // Helper function to sanitize targets against Path Traversal vulnerabilities
 function getSafePath(id: string, filename: string): string {
-  const cleanId = String(id).replace(/[^a-zA-Z0-9_\-]/g, "");
   const cleanFilename = path.basename(filename).replace(/[\\/]/g, "_");
-  return path.join(DOWNLOADS_DIR, `${cleanId}_${cleanFilename}`);
+  let targetDir = settings.downloadDirectory || DOWNLOADS_DIR;
+
+  const task = downloadsDb.find(t => t.id === id);
+  if (task && task.packageName) {
+    const cleanPackageName = task.packageName.replace(/[^a-zA-Z0-9_\- ]/g, "_").trim();
+    if (cleanPackageName) {
+      targetDir = path.join(targetDir, cleanPackageName);
+    }
+  }
+
+  if (!fs.existsSync(targetDir)) {
+    fs.mkdirSync(targetDir, { recursive: true });
+  }
+  return path.join(targetDir, cleanFilename);
+}
+
+function getPackageNameFromUrl(urlStr?: string): string {
+  if (!urlStr) return "Downloads";
+  try {
+    const url = new URL(urlStr);
+    let name = url.hostname;
+    const pathname = url.pathname.replace(/\/$/, "");
+    const lastSegment = pathname.split("/").pop();
+    if (lastSegment && lastSegment !== name) {
+      name = `${lastSegment}_--_${name}`;
+    }
+    return name.replace(/[^a-zA-Z0-9_\-.]/g, "_");
+  } catch (_) {
+    return "Downloads";
+  }
+}
+
+function getGroupBaseName(filename: string): string {
+  const ext = path.extname(filename);
+  const base = path.basename(filename, ext);
+  // Match standard part patterns e.g. .part01, _part1, -part3, _part001, .part1of5, _1of5, -1, _01 at the end of base name
+  const partSuffixRegex = /[._-](?:part\d+|\d+of\d+|\d+)$/i;
+  return base.replace(partSuffixRegex, "");
 }
 
 // Centrale enterprise-grade SSRF protection check
@@ -724,6 +770,7 @@ async function analyzeUrl(url: string, runAi = false): Promise<GrabbedLink[]> {
         selected: true,
         source: "fuckingfast-extractor",
         sourcePageUrl: url,
+        packageName: getPackageNameFromUrl(url),
       }));
     }
     if (isMock) {
@@ -898,6 +945,7 @@ ${textBlob}`;
                 selected: true,
                 source: "gemini-analyzer",
                 sourcePageUrl: url,
+                packageName: getPackageNameFromUrl(url),
               });
             });
           }
@@ -941,6 +989,7 @@ ${textBlob}`;
             selected: true,
             source: "link-crawler",
             sourcePageUrl: url,
+            packageName: getPackageNameFromUrl(url),
           });
         }
       }
@@ -1075,31 +1124,65 @@ function getDownloadsDirSize(): number {
       });
     } else if (action === "import_selected") {
       const selected = grabbedLinksInbox.filter((l) => l.selected);
-      // Move to Downloads
-      selected.forEach((item) => {
-        // Detect duplicates
-        const exists = downloadsDb.some((t) => t.url === item.url && t.status !== "completed");
-        if (exists && settings.duplicateAction === "skip") return;
+      
+      // Group selected items by their baseName (if part file) or packageName/sourcePageUrl
+      const groupsMap = new Map<string, { name: string; items: typeof selected }>();
+      selected.forEach(item => {
+        const ext = path.extname(item.filename);
+        const base = path.basename(item.filename, ext);
+        const baseName = getGroupBaseName(item.filename);
+        const hasParts = baseName !== base;
 
-        let filename = item.filename;
-        if (exists && settings.duplicateAction === "rename") {
-          const ext = path.extname(filename);
-          const base = path.basename(filename, ext);
-          filename = `${base}_${Date.now()}${ext}`;
+        const key = hasParts 
+          ? baseName 
+          : (item.packageName && item.packageName !== "Downloads" ? item.packageName : getPackageNameFromUrl(item.sourcePageUrl));
+
+        if (!groupsMap.has(key)) {
+          groupsMap.set(key, { name: key, items: [] });
         }
+        groupsMap.get(key)!.items.push(item);
+      });
 
-        downloadsDb.push({
-          id: `task_${Date.now()}_${Math.random().toString(36).substr(2, 5)}`,
-          url: item.url,
-          filename,
-          size: item.size,
-          downloaded: 0,
-          status: "queued",
-          speed: 0,
-          mimeType: item.mimeType,
-          addedAt: new Date().toISOString(),
-          resumable: item.resumable,
-          sourcePageUrl: item.sourcePageUrl || item.url,
+      groupsMap.forEach((groupVal, key) => {
+        const isGroup = groupVal.items.length > 1 || (key !== "Downloads" && key !== "direct-url");
+        
+        // Find if there is an existing package in active queue to merge into
+        let packageId: string | undefined;
+        const existingTask = downloadsDb.find(t => t.packageName === key);
+        if (existingTask && existingTask.packageId) {
+          packageId = existingTask.packageId;
+        } else {
+          packageId = isGroup ? `package_${Date.now()}_${Math.random().toString(36).substr(2, 5)}` : undefined;
+        }
+        
+        const packageName = isGroup ? groupVal.name : undefined;
+
+        groupVal.items.forEach((item) => {
+          const exists = downloadsDb.some((t) => t.url === item.url && t.status !== "completed");
+          if (exists && settings.duplicateAction === "skip") return;
+
+          let filename = item.filename;
+          if (exists && settings.duplicateAction === "rename") {
+            const ext = path.extname(filename);
+            const base = path.basename(filename, ext);
+            filename = `${base}_${Date.now()}${ext}`;
+          }
+
+          downloadsDb.push({
+            id: `task_${Date.now()}_${Math.random().toString(36).substr(2, 5)}`,
+            url: item.url,
+            filename,
+            size: item.size,
+            downloaded: 0,
+            status: "queued",
+            speed: 0,
+            mimeType: item.mimeType,
+            addedAt: new Date().toISOString(),
+            resumable: item.resumable,
+            sourcePageUrl: item.sourcePageUrl || item.url,
+            packageId,
+            packageName
+          });
         });
       });
       // Clear from Inbox
@@ -1414,13 +1497,17 @@ function getDownloadsDirSize(): number {
 
   // Connect Vite Development environment or static routing
   if (process.env.NODE_ENV !== "production") {
+    const { createServer: createViteServer } = await import("vite");
     const vite = await createViteServer({
       server: { middlewareMode: true },
       appType: "spa",
     });
     app.use(vite.middlewares);
   } else {
-    const distPath = path.join(process.cwd(), "dist");
+    let distPath = path.join(__dirname, "dist");
+    if (!fs.existsSync(distPath)) {
+      distPath = __dirname;
+    }
     app.use(express.static(distPath));
     app.get("*", (req, res) => {
       res.sendFile(path.join(distPath, "index.html"));
