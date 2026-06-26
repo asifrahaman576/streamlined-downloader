@@ -10,16 +10,69 @@ const __dirname = pathModule.dirname(__filename);
 const app = express();
 const PORT = process.env.PORT || 3001;
 const DATA_FILE = pathModule.join(__dirname, 'telemetry.json');
-const ADMIN_PASSWORD = process.env.ADMIN_PASSWORD || 'streamlineadmin';
+const BACKUP_FILE = pathModule.join(__dirname, 'telemetry.backup.json');
+
+// SECURITY: Require ADMIN_PASSWORD from environment variable - no hardcoded fallback
+const ADMIN_PASSWORD = process.env.ADMIN_PASSWORD;
+if (!ADMIN_PASSWORD) {
+  console.error('FATAL: ADMIN_PASSWORD environment variable is required.');
+  process.exit(1);
+}
+
+// Input length caps for sanitization
+const MAX_DISTINCT_ID_LENGTH = 128;
+const MAX_STRING_FIELD_LENGTH = 256;
+const MAX_EVENT_LENGTH = 128;
+
+// Rate limiting configuration: 30 requests per minute per IP
+const RATE_LIMIT_WINDOW_MS = 60 * 1000;
+const RATE_LIMIT_MAX = 30;
+const rateLimitStore = new Map();
+
+function rateLimiter(req, res, next) {
+  const ip = req.ip || req.connection.remoteAddress;
+  const now = Date.now();
+
+  if (!rateLimitStore.has(ip)) {
+    rateLimitStore.set(ip, []);
+  }
+
+  const timestamps = rateLimitStore.get(ip).filter(t => now - t < RATE_LIMIT_WINDOW_MS);
+  rateLimitStore.set(ip, timestamps);
+
+  if (timestamps.length >= RATE_LIMIT_MAX) {
+    return res.status(429).json({ error: 'Too many requests. Limit: 30 per minute.' });
+  }
+
+  timestamps.push(now);
+  next();
+}
+
+// Periodically clean up stale rate limit entries (every 5 minutes)
+setInterval(() => {
+  const now = Date.now();
+  for (const [ip, timestamps] of rateLimitStore.entries()) {
+    const valid = timestamps.filter(t => now - t < RATE_LIMIT_WINDOW_MS);
+    if (valid.length === 0) {
+      rateLimitStore.delete(ip);
+    } else {
+      rateLimitStore.set(ip, valid);
+    }
+  }
+}, 5 * 60 * 1000);
 
 app.use(cors());
-app.use(express.json());
+app.use(express.json({ limit: '100kb' }));
 app.use(express.urlencoded({ extended: true }));
 
-// Serve static landing page files (except index.html if we want custom control, but Express static handles public folder automatically)
-// To prevent public/index.html from overriding our routes, we place static after routing or let it serve / automatically.
-// Express static on public will serve index.html on / automatically, which is exactly what we want for the public download page!
+// Serve static landing page files
 app.use(express.static(pathModule.join(__dirname, 'public')));
+
+// Input sanitization helper: trim and cap length
+function sanitizeString(value, maxLength = MAX_STRING_FIELD_LENGTH) {
+  if (typeof value !== 'string') return 'unknown';
+  return value.trim().slice(0, maxLength);
+}
 
 function initDatabase() {
   if (!fs.existsSync(DATA_FILE)) {
@@ -41,6 +94,9 @@ function readData() {
 
 function writeData(data) {
   try {
+    // Write backup first for data persistence
+    fs.writeFileSync(BACKUP_FILE, JSON.stringify(data, null, 2), 'utf8');
+    // Then write the primary file
     fs.writeFileSync(DATA_FILE, JSON.stringify(data, null, 2), 'utf8');
   } catch (err) {
     console.error('Error writing telemetry data:', err);
@@ -66,7 +122,7 @@ function requireAdmin(req, res, next) {
   if (session === ADMIN_PASSWORD) {
     return next();
   }
-  
+
   // Also check query param as fallback
   if (req.query.secret === ADMIN_PASSWORD) {
     return next();
@@ -79,15 +135,34 @@ function requireAdmin(req, res, next) {
   res.redirect('/admin/login');
 }
 
-// Ingest telemetry ping (Public - no auth required)
-app.post('/api/telemetry/ping', (req, res) => {
+// Health check endpoint
+app.get('/api/health', (req, res) => {
+  res.json({ status: 'ok', uptime: process.uptime(), timestamp: new Date().toISOString() });
+});
+
+// Ingest telemetry ping (Public - no auth required, rate limited)
+app.post('/api/telemetry/ping', rateLimiter, (req, res) => {
   const { event, properties } = req.body;
+
   if (!properties || !properties.distinct_id) {
     return res.status(400).json({ error: 'Missing distinct_id in properties' });
   }
 
+  // Validate distinct_id: reject empty or whitespace-only values
+  const distinctId = typeof properties.distinct_id === 'string' ? properties.distinct_id.trim() : '';
+  if (!distinctId || distinctId.length === 0) {
+    return res.status(400).json({ error: 'distinct_id cannot be empty or whitespace' });
+  }
+
+  // Sanitize all inputs with length caps
+  const installId = sanitizeString(distinctId, MAX_DISTINCT_ID_LENGTH);
+  const sanitizedEvent = event ? sanitizeString(event, MAX_EVENT_LENGTH) : 'ping';
+  const platform = sanitizeString(properties.platform || 'unknown');
+  const arch = sanitizeString(properties.arch || 'unknown');
+  const appVersion = sanitizeString(properties.app_version || 'unknown');
+  const osVersion = sanitizeString(properties.os_version || 'unknown');
+
   const data = readData();
-  const installId = properties.distinct_id;
   const now = new Date().toISOString();
 
   if (!data.devices[installId]) {
@@ -95,24 +170,24 @@ app.post('/api/telemetry/ping', (req, res) => {
       installationId: installId,
       firstSeen: now,
       lastSeen: now,
-      platform: properties.platform || 'unknown',
-      arch: properties.arch || 'unknown',
-      version: properties.app_version || 'unknown',
-      osVersion: properties.os_version || 'unknown'
+      platform: platform,
+      arch: arch,
+      version: appVersion,
+      osVersion: osVersion
     };
   } else {
     data.devices[installId].lastSeen = now;
-    if (properties.platform) data.devices[installId].platform = properties.platform;
-    if (properties.arch) data.devices[installId].arch = properties.arch;
-    if (properties.app_version) data.devices[installId].version = properties.app_version;
-    if (properties.os_version) data.devices[installId].osVersion = properties.os_version;
+    data.devices[installId].platform = platform;
+    data.devices[installId].arch = arch;
+    data.devices[installId].version = appVersion;
+    data.devices[installId].osVersion = osVersion;
   }
 
   data.pings.push({
     installationId: installId,
     timestamp: now,
-    platform: properties.platform || 'unknown',
-    version: properties.app_version || 'unknown'
+    platform: platform,
+    version: appVersion
   });
 
   if (data.pings.length > 50000) {
@@ -194,7 +269,7 @@ app.get('/admin/logout', (req, res) => {
 app.get('/api/telemetry/stats', requireAdmin, (req, res) => {
   const data = readData();
   const now = new Date();
-  
+
   const devicesList = Object.values(data.devices);
   const totalInstalls = devicesList.length;
 
