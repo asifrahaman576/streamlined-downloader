@@ -1,4 +1,5 @@
 node_modules/
 telemetry.json
+telemetry.backup.json
 .env
 *.exe
